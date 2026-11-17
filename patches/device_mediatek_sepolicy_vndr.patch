@@ -1,0 +1,27 @@
+diff --git a/basic/non_plat/file_contexts b/basic/non_plat/file_contexts
+index e5a6d0f..1b2b156 100644
+--- a/basic/non_plat/file_contexts
++++ b/basic/non_plat/file_contexts
+@@ -698,7 +698,7 @@
+ /dev/vpud u:object_r:vpud_device:s0
+ 
+ # System files
+-/system/bin/netutils-wrapper-1.0         u:object_r:netutils_wrapper_exec_bin:s0
++#/system/bin/netutils-wrapper-1.0         u:object_r:netutils_wrapper_exec_bin:s0
+ 
+ ##########################
+ # Vendor files
+diff --git a/basic/non_plat/genfs_contexts b/basic/non_plat/genfs_contexts
+index 1ed242e..fbf9a32 100644
+--- a/basic/non_plat/genfs_contexts
++++ b/basic/non_plat/genfs_contexts
+@@ -249,7 +249,8 @@ genfscon sysfs /devices/platform/1000d000.pwrap/1000d000.pwrap:main_pmic/mt6397-
+ genfscon sysfs /devices/platform/soc/1000d000.pwrap/1000d000.pwrap:main_pmic/mt6397-rtc/rtc                         u:object_r:sysfs_rtc:s0
+ genfscon sysfs /devices/platform/10026000.pwrap/10026000.pwrap:mt6359-pmic/mt6359-rtc/rtc                           u:object_r:sysfs_rtc:s0
+ genfscon sysfs /devices/platform/10026000.pwrap/10026000.pwrap:mt6359p/mt6359p-rtc/rtc                              u:object_r:sysfs_rtc:s0
+-genfscon sysfs /class/typec                                                                                         u:object_r:sysfs_usb_nonplat:s0
++# A17 compat: sysfs /class/typec is now managed by plat_sepolicy (sysfs_typec)
++# genfscon sysfs /class/typec                                                                                         u:object_r:sysfs_usb_nonplat:s0
+ genfscon sysfs /devices/platform/mt_usb/musb-hdrc/dual_role_usb                                                     u:object_r:sysfs_usb_nonplat:s0
+ genfscon sysfs /devices/platform/mt_usb/musb-hdrc/cmode                                                             u:object_r:sysfs_usb_nonplat:s0
+ genfscon sysfs /devices/platform/11270000.usb3/musb-hdrc/cmode                                                      u:object_r:sysfs_usb_nonplat:s0

@@ -1,0 +1,19 @@
+diff --git a/loader/Loader.cpp b/loader/Loader.cpp
+index 16d5c41..f5e4989 100644
+--- a/loader/Loader.cpp
++++ b/loader/Loader.cpp
+@@ -702,13 +702,7 @@ void vendorBpfLoader() {
+ 
+     // Load all ELF objects, create programs and maps, and pin them
+     if (!android::bpf::loadAllElfObjects()) {
+-        ALOGE("=== CRITICAL FAILURE LOADING BPF PROGRAMS FROM /vendor/etc/bpf ===");
+-        ALOGE("If this triggers reliably, you're probably missing kernel options or patches.");
+-        ALOGE("If this triggers randomly, you might be hitting some memory allocation "
+-              "problems or startup script race.");
+-        ALOGE("--- DO NOT EXPECT SYSTEM TO BOOT SUCCESSFULLY ---");
+-        sleep(20);
+-        exit(121);
++        ALOGW("=== NON-FATAL FAILURE LOADING BPF PROGRAMS FROM /vendor/etc/bpf (continuing on legacy 4.14 kernel) ===");
+     }
+ 
+     const char* args[] = {"/apex/com.android.tethering/bin/netbpfload", "done", NULL};

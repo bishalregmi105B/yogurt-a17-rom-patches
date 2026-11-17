@@ -1,0 +1,318 @@
+diff --git a/packages/SystemUI/src/com/android/systemui/screenrecord/RecordingService.java b/packages/SystemUI/src/com/android/systemui/screenrecord/RecordingService.java
+index c73989304..5cee3ac25 100644
+--- a/packages/SystemUI/src/com/android/systemui/screenrecord/RecordingService.java
++++ b/packages/SystemUI/src/com/android/systemui/screenrecord/RecordingService.java
+@@ -249,7 +249,7 @@ public class RecordingService extends Service implements ScreenMediaRecorderList
+                 Log.d(getTag(), "recording with audio source " + mAudioSource);
+                 mLowQuality = intent.getBooleanExtra(EXTRA_LOW_QUALITY, false);
+                 mLongerDuration = intent.getBooleanExtra(EXTRA_LONGER_DURATION, false);
+-                mHEVC = intent.getBooleanExtra(EXTRA_HEVC, true);
++                mHEVC = intent.getBooleanExtra(EXTRA_HEVC, false);
+                 mKeepScreenAwake = intent.getBooleanExtra(EXTRA_KEEP_SCREEN_AWAKE, false);
+ 
+                 MediaProjectionCaptureTarget captureTarget =
+diff --git a/packages/SystemUI/src/com/android/systemui/screenrecord/ScreenMediaRecorder.java b/packages/SystemUI/src/com/android/systemui/screenrecord/ScreenMediaRecorder.java
+index c4703de2e..6d62d97ba 100644
+--- a/packages/SystemUI/src/com/android/systemui/screenrecord/ScreenMediaRecorder.java
++++ b/packages/SystemUI/src/com/android/systemui/screenrecord/ScreenMediaRecorder.java
+@@ -313,14 +313,16 @@ public class ScreenMediaRecorder {
+         // Check if we can support screen size as-is
+         int width = vc.getSupportedWidths().getUpper();
+         int height = vc.getSupportedHeights().getUpper();
++        int widthAlignment = Math.max(16, vc.getWidthAlignment());
++        int heightAlignment = Math.max(16, vc.getHeightAlignment());
+ 
+         int screenWidthAligned = screenWidth;
+-        if (screenWidthAligned % vc.getWidthAlignment() != 0) {
+-            screenWidthAligned -= (screenWidthAligned % vc.getWidthAlignment());
++        if (screenWidthAligned % widthAlignment != 0) {
++            screenWidthAligned -= (screenWidthAligned % widthAlignment);
+         }
+         int screenHeightAligned = screenHeight;
+-        if (screenHeightAligned % vc.getHeightAlignment() != 0) {
+-            screenHeightAligned -= (screenHeightAligned % vc.getHeightAlignment());
++        if (screenHeightAligned % heightAlignment != 0) {
++            screenHeightAligned -= (screenHeightAligned % heightAlignment);
+         }
+ 
+         if (width >= screenWidthAligned && height >= screenHeightAligned
+@@ -346,11 +348,11 @@ public class ScreenMediaRecorder {
+ 
+         int scaledWidth = (int) (screenWidth * scale);
+         int scaledHeight = (int) (screenHeight * scale);
+-        if (scaledWidth % vc.getWidthAlignment() != 0) {
+-            scaledWidth -= (scaledWidth % vc.getWidthAlignment());
++        if (scaledWidth % widthAlignment != 0) {
++            scaledWidth -= (scaledWidth % widthAlignment);
+         }
+-        if (scaledHeight % vc.getHeightAlignment() != 0) {
+-            scaledHeight -= (scaledHeight % vc.getHeightAlignment());
++        if (scaledHeight % heightAlignment != 0) {
++            scaledHeight -= (scaledHeight % heightAlignment);
+         }
+ 
+         // Find max supported rate for size
+diff --git a/packages/SystemUI/src/com/android/systemui/screenrecord/ScreenRecordPermissionContentManager.kt b/packages/SystemUI/src/com/android/systemui/screenrecord/ScreenRecordPermissionContentManager.kt
+index 2965181b1..9a180606a 100644
+--- a/packages/SystemUI/src/com/android/systemui/screenrecord/ScreenRecordPermissionContentManager.kt
++++ b/packages/SystemUI/src/com/android/systemui/screenrecord/ScreenRecordPermissionContentManager.kt
+@@ -312,7 +312,7 @@ class ScreenRecordPermissionContentManager(
+         audioSwitch.isChecked = Prefs.getInt(userContext, PREF_AUDIO, 0) == 1
+         options.setSelection(Prefs.getInt(userContext, PREF_AUDIO_SOURCE, 0))
+         skipTimeSwitch.isChecked = Prefs.getInt(userContext, PREF_SKIP, 0) == 1
+-        hevcSwitch.isChecked = Prefs.getInt(userContext, PREF_HEVC, 1) == 1
++        hevcSwitch.isChecked = Prefs.getInt(userContext, PREF_HEVC, 0) == 1
+         keepAwakeSwitch.isChecked = Prefs.getInt(userContext, PREF_KEEP_AWAKE, 0) == 1
+     }
+ 
+diff --git a/services/core/java/com/android/server/policy/PhoneWindowManager.java b/services/core/java/com/android/server/policy/PhoneWindowManager.java
+index 4abd90ee0..034c877d8 100644
+--- a/services/core/java/com/android/server/policy/PhoneWindowManager.java
++++ b/services/core/java/com/android/server/policy/PhoneWindowManager.java
+@@ -130,6 +130,7 @@ import android.app.ActivityOptions;
+ import android.app.ActivityTaskManager;
+ import android.app.ActivityTaskManager.RootTaskInfo;
+ import android.app.AlarmManager;
++import android.app.AlertDialog;
+ import android.app.AppOpsManager;
+ import android.app.BroadcastOptions;
+ import android.app.IActivityManager;
+@@ -145,6 +146,7 @@ import android.content.BroadcastReceiver;
+ import android.content.ComponentName;
+ import android.content.ContentResolver;
+ import android.content.Context;
++import android.content.DialogInterface;
+ import android.content.Intent;
+ import android.content.IntentFilter;
+ import android.content.PermissionChecker;
+@@ -951,6 +953,121 @@ public class PhoneWindowManager implements WindowManagerPolicy {
+         }
+     }
+ 
++    // Extra hardware button (e.g. Micromax IN Note 1 dedicated assistant button)
++    private boolean mExtraButtonLongPressed = false;
++    private final Runnable mExtraButtonLongPressRunnable = new Runnable() {
++        @Override
++        public void run() {
++            mExtraButtonLongPressed = true;
++            performHapticFeedback(HapticFeedbackConstants.LONG_PRESS, "Extra Button - Long Press");
++            showExtraButtonAppPicker();
++        }
++    };
++
++    private void handleExtraButtonEvent(KeyEvent event, int policyFlags) {
++        final boolean down = event.getAction() == KeyEvent.ACTION_DOWN;
++        final boolean interactive = (policyFlags & WindowManagerPolicy.FLAG_INTERACTIVE) != 0;
++
++        if (!interactive) {
++            if (down) {
++                wakeUpFromWakeKey(event);
++            }
++            return;
++        }
++
++        if (down) {
++            if (event.getRepeatCount() == 0) {
++                mExtraButtonLongPressed = false;
++                mHandler.postDelayed(mExtraButtonLongPressRunnable, 500);
++            }
++        } else {
++            mHandler.removeCallbacks(mExtraButtonLongPressRunnable);
++            if (mExtraButtonLongPressed) {
++                mExtraButtonLongPressed = false;
++            } else {
++                performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY, "Extra Button - Press");
++                handleExtraButtonPress(false);
++            }
++        }
++    }
++
++    private void handleExtraButtonPress(boolean forcePicker) {
++        final ContentResolver resolver = mContext.getContentResolver();
++        final PackageManager pm = mContext.getPackageManager();
++        final String selectedPkg = Settings.System.getString(resolver, "extra_button_app");
++
++        if (!forcePicker && selectedPkg != null && !selectedPkg.isEmpty()) {
++            Intent launchIntent = pm.getLaunchIntentForPackage(selectedPkg);
++            if (launchIntent != null) {
++                launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
++                        | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
++                if (mKeyguardDelegate != null && mKeyguardDelegate.isShowing()) {
++                    mKeyguardDelegate.dismissKeyguardToLaunch(launchIntent);
++                } else {
++                    startActivityAsUser(launchIntent, UserHandle.CURRENT_OR_SELF);
++                }
++                return;
++            }
++            Settings.System.putString(resolver, "extra_button_app", null);
++        }
++
++        showExtraButtonAppPicker();
++    }
++
++    private void showExtraButtonAppPicker() {
++        mHandler.post(new Runnable() {
++            @Override
++            public void run() {
++                final PackageManager pm = mContext.getPackageManager();
++                final Intent mainIntent = new Intent(Intent.ACTION_MAIN, null);
++                mainIntent.addCategory(Intent.CATEGORY_LAUNCHER);
++
++                final List<ResolveInfo> apps = pm.queryIntentActivities(mainIntent, 0);
++                if (apps == null || apps.isEmpty()) {
++                    Slog.e(TAG, "No launchable apps found for extra button picker!");
++                    return;
++                }
++
++                apps.sort(new ResolveInfo.DisplayNameComparator(pm));
++
++                final int count = apps.size();
++                final String[] appNames = new String[count];
++                final String[] pkgNames = new String[count];
++                for (int i = 0; i < count; i++) {
++                    ResolveInfo ri = apps.get(i);
++                    CharSequence label = ri.loadLabel(pm);
++                    appNames[i] = (label != null) ? label.toString() : ri.activityInfo.packageName;
++                    pkgNames[i] = ri.activityInfo.packageName;
++                }
++
++                AlertDialog.Builder builder = new AlertDialog.Builder(mContext);
++                builder.setTitle("Select app for Extra Button");
++                builder.setItems(appNames, new DialogInterface.OnClickListener() {
++                    @Override
++                    public void onClick(DialogInterface dialog, int which) {
++                        String chosenPkg = pkgNames[which];
++                        Settings.System.putString(mContext.getContentResolver(), "extra_button_app", chosenPkg);
++                        Intent launchIntent = pm.getLaunchIntentForPackage(chosenPkg);
++                        if (launchIntent != null) {
++                            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
++                                    | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
++                            if (mKeyguardDelegate != null && mKeyguardDelegate.isShowing()) {
++                                mKeyguardDelegate.dismissKeyguardToLaunch(launchIntent);
++                            } else {
++                                startActivityAsUser(launchIntent, UserHandle.CURRENT_OR_SELF);
++                            }
++                        }
++                    }
++                });
++                builder.setNegativeButton(android.R.string.cancel, null);
++
++                AlertDialog dialog = builder.create();
++                dialog.getWindow().setType(WindowManager.LayoutParams.TYPE_KEYGUARD_DIALOG);
++                dialog.show();
++            }
++        });
++    }
++
+     private UEventObserver mHDMIObserver = new UEventObserver() {
+         @Override
+         public void onUEvent(UEventObserver.UEvent event) {
+@@ -5194,6 +5311,11 @@ public class PhoneWindowManager implements WindowManagerPolicy {
+             }
+         }
+ 
++        if (keyCode == KeyEvent.KEYCODE_MOVE_HOME) {
++            handleExtraButtonEvent(event, policyFlags);
++            return 0;
++        }
++
+         final boolean canceled = event.isCanceled();
+         final int displayId = event.getDisplayId();
+         final boolean isInjected = (policyFlags & WindowManagerPolicy.FLAG_INJECTED) != 0;
+diff --git a/services/core/java/com/android/server/power/hint/HintManagerService.java b/services/core/java/com/android/server/power/hint/HintManagerService.java
+index 5d9e51289..15d0027fe 100644
+--- a/services/core/java/com/android/server/power/hint/HintManagerService.java
++++ b/services/core/java/com/android/server/power/hint/HintManagerService.java
+@@ -322,14 +322,19 @@ public final class HintManagerService extends SystemService {
+                 LocalServices.getService(ActivityManagerInternal.class));
+         mPowerHal = injector.createIPower();
+         mPowerHalVersion = 0;
+-        mVendorApiLevel = Integer.parseInt(SystemProperties.get(PROPERTY_VENDOR_API_LEVEL, ""));
++        String apiLevelStr = SystemProperties.get(PROPERTY_VENDOR_API_LEVEL, "29");
++        int vendorApiLevel = 29;
++        try {
++            vendorApiLevel = apiLevelStr.isEmpty() ? 29 : Integer.parseInt(apiLevelStr);
++        } catch (NumberFormatException e) {
++            vendorApiLevel = 29;
++        }
++        mVendorApiLevel = vendorApiLevel;
+         mUsesFmq = false;
+-        if (mPowerHal != null) {
+-            try {
+-                mSupportInfo = getSupportInfo();
+-            } catch (RemoteException e) {
+-                throw new IllegalStateException("Could not contact PowerHAL!", e);
+-            }
++        try {
++            mSupportInfo = getSupportInfo();
++        } catch (RemoteException e) {
++            throw new IllegalStateException("Could not contact PowerHAL!", e);
+         }
+         if (mSupportInfo.headroom.isCpuSupported) {
+             mCpuHeadroomCache = new HeadroomCache<>(2, mSupportInfo.headroom.cpuMinIntervalMillis);
+@@ -362,13 +367,15 @@ public final class HintManagerService extends SystemService {
+     }
+ 
+     SupportInfo getSupportInfo() throws RemoteException {
+-        try {
+-            mPowerHalVersion = mPowerHal.getInterfaceVersion();
+-            if (mPowerHalVersion >= 6) {
+-                return mPowerHal.getSupportInfo();
++        if (mPowerHal != null) {
++            try {
++                mPowerHalVersion = mPowerHal.getInterfaceVersion();
++                if (mPowerHalVersion >= 6) {
++                    return mPowerHal.getSupportInfo();
++                }
++            } catch (RemoteException e) {
++                throw new IllegalStateException("Could not contact PowerHAL!", e);
+             }
+-        } catch (RemoteException e) {
+-            throw new IllegalStateException("Could not contact PowerHAL!", e);
+         }
+ 
+         SupportInfo supportInfo = new SupportInfo();
+diff --git a/services/core/java/com/android/server/security/FileIntegrity.java b/services/core/java/com/android/server/security/FileIntegrity.java
+index b8f187e0e..f208ef78f 100644
+--- a/services/core/java/com/android/server/security/FileIntegrity.java
++++ b/services/core/java/com/android/server/security/FileIntegrity.java
+@@ -46,6 +46,9 @@ public final class FileIntegrity {
+      */
+     @SystemApi(client = SystemApi.Client.SYSTEM_SERVER)
+     public static void setUpFsVerity(@NonNull File file) throws IOException {
++        if (!VerityUtils.isFsVeritySupported()) {
++            return;
++        }
+         try (ParcelFileDescriptor pfd = ParcelFileDescriptor.open(file, MODE_READ_ONLY)) {
+             setUpFsVerity(pfd);
+         }
+@@ -63,6 +66,9 @@ public final class FileIntegrity {
+     @SystemApi(client = SystemApi.Client.SYSTEM_SERVER)
+     public static void setUpFsVerity(@NonNull ParcelFileDescriptor parcelFileDescriptor)
+             throws IOException {
++        if (!VerityUtils.isFsVeritySupported()) {
++            return;
++        }
+         VerityUtils.setUpFsverity(parcelFileDescriptor.getFd());
+     }
+ }
+diff --git a/telephony/java/android/telephony/SubscriptionManager.java b/telephony/java/android/telephony/SubscriptionManager.java
+index 0583761ff..d507be3ab 100644
+--- a/telephony/java/android/telephony/SubscriptionManager.java
++++ b/telephony/java/android/telephony/SubscriptionManager.java
+@@ -5443,4 +5443,15 @@ public class SubscriptionManager {
+             throw ex.rethrowFromSystemServer();
+         }
+     }
++
++    /**
++     * Legacy compatibility helper for vendor telephony/IMS stacks.
++     *
++     * @param slotIndex The SIM slot index.
++     * @return The SIM state constant from {@link TelephonyManager}.
++     * @hide
++     */
++    public static int getSimStateForSlotIndex(int slotIndex) {
++        return TelephonyManager.getSimStateForSlotIndex(slotIndex);
++    }
+ }

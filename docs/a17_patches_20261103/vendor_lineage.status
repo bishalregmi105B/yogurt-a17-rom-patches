@@ -1,0 +1,4 @@
+ M build/envsetup.sh
+ M config/common.mk
+ M config/derpfest.mk
+ M tools/generate_json_build_info.sh

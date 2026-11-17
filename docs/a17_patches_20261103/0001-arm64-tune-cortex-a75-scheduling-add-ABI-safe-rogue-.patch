@@ -1,0 +1,91 @@
+From 7d2d9ff944518b2a8977b1d6fdecf77eeffe79a3 Mon Sep 17 00:00:00 2001
+From: Bishal Regmi <89974678+bishalregmi105B@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 22:06:33 +0545
+Subject: [PATCH] arm64: tune cortex-a75 scheduling, add ABI-safe rogue
+ wakelock blocker & forward cpuset mount options
+
+---
+ arch/arm64/Makefile         |  1 +
+ drivers/base/power/wakeup.c | 22 ++++++++++++++++++++++
+ kernel/cgroup/cpuset.c      | 13 ++++++++++---
+ 3 files changed, 33 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm64/Makefile b/arch/arm64/Makefile
+index 76375630c..e8b3eb81d 100644
+--- a/arch/arm64/Makefile
++++ b/arch/arm64/Makefile
+@@ -99,6 +99,7 @@ KBUILD_CFLAGS	+= -fno-pic
+ KBUILD_AFLAGS	+= $(lseinstr) $(brokengasinst) $(vdso32)
+ 
+ KBUILD_CFLAGS	+= $(call cc-option,-mabi=lp64)
++KBUILD_CFLAGS	+= $(call cc-option,-mtune=cortex-a75)
+ KBUILD_AFLAGS	+= $(call cc-option,-mabi=lp64)
+ 
+ ifeq ($(cc-name),clang)
+diff --git a/drivers/base/power/wakeup.c b/drivers/base/power/wakeup.c
+index b7cd3b426..4dca71676 100644
+--- a/drivers/base/power/wakeup.c
++++ b/drivers/base/power/wakeup.c
+@@ -528,6 +528,25 @@ static bool wakeup_source_not_registered(struct wakeup_source *ws)
+  * core of the event by incrementing the counter of of wakeup events being
+  * processed.
+  */
++static bool is_wakelock_blocked(const char *name)
++{
++	if (!name)
++		return false;
++
++	/*
++	 * MediaTek MT6768 battery drain mitigation:
++	 * Filter out non-critical network & broadcast wakelocks that prevent
++	 * Cortex-A55 cores from entering MCDI / deep suspend while screen is off.
++	 */
++	if (!strcmp(name, "wlan_wow_wl") ||
++	    !strcmp(name, "wlan_ext_wow_wl") ||
++	    !strcmp(name, "NETLINK") ||
++	    !strcmp(name, "ipa_ws"))
++		return true;
++
++	return false;
++}
++
+ static void wakeup_source_activate(struct wakeup_source *ws)
+ {
+ 	unsigned int cec;
+@@ -536,6 +555,9 @@ static void wakeup_source_activate(struct wakeup_source *ws)
+ 			"unregistered wakeup source\n"))
+ 		return;
+ 
++	if (is_wakelock_blocked(ws->name))
++		return;
++
+ 	ws->active = true;
+ 	ws->active_count++;
+ 	ws->last_time = ktime_get();
+diff --git a/kernel/cgroup/cpuset.c b/kernel/cgroup/cpuset.c
+index 7e5cb1f83..baeebb806 100644
+--- a/kernel/cgroup/cpuset.c
++++ b/kernel/cgroup/cpuset.c
+@@ -327,9 +327,16 @@ static struct dentry *cpuset_mount(struct file_system_type *fs_type,
+ 	struct file_system_type *cgroup_fs = get_fs_type("cgroup");
+ 	struct dentry *ret = ERR_PTR(-ENODEV);
+ 	if (cgroup_fs) {
+-		char mountopts[] =
+-			"cpuset,noprefix,"
+-			"release_agent=/sbin/cpuset_release_agent";
++		char mountopts[256];
++		if (data && ((char *)data)[0]) {
++			snprintf(mountopts, sizeof(mountopts),
++				 "cpuset,noprefix,release_agent=/sbin/cpuset_release_agent,%s",
++				 (char *)data);
++		} else {
++			strlcpy(mountopts,
++				"cpuset,noprefix,release_agent=/sbin/cpuset_release_agent",
++				sizeof(mountopts));
++		}
+ 		ret = cgroup_fs->mount(cgroup_fs, flags,
+ 					   unused_dev_name, mountopts);
+ 		put_filesystem(cgroup_fs);
+-- 
+2.53.0
+

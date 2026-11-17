@@ -1,0 +1,43 @@
+diff --git a/AndroidManifest.xml b/AndroidManifest.xml
+index cd03659..9e34369 100644
+--- a/AndroidManifest.xml
++++ b/AndroidManifest.xml
+@@ -15,8 +15,8 @@
+ -->
+ 
+ <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+-     android:versionCode="1"
+-     android:versionName="1.0.0"
++     android:versionCode="2"
++     android:versionName="1.0.1"
+      package="com.android.carrierconfig">
+ 
+     <uses-permission android:name="android.permission.READ_PRIVILEGED_PHONE_STATE"/>
+diff --git a/src/com/android/carrierconfig/DefaultCarrierConfigService.java b/src/com/android/carrierconfig/DefaultCarrierConfigService.java
+index b619283..18f9b0b 100644
+--- a/src/com/android/carrierconfig/DefaultCarrierConfigService.java
++++ b/src/com/android/carrierconfig/DefaultCarrierConfigService.java
+@@ -361,7 +361,22 @@ public class DefaultCarrierConfigService extends CarrierService {
+                     result = (id == null) || value.equals(id.getMcc());
+                     break;
+                 case "mnc":
+-                    result = (id == null) || value.equals(id.getMnc());
++                    if (id == null) {
++                        result = true;
++                    } else if (value.equals(id.getMnc())) {
++                        result = true;
++                    } else {
++                        // aapt2 strips leading zeros from numeric XML attributes (e.g. "02" -> "2").
++                        // Fall back to canonical_id/cid OR match integer values only when SIM MNC
++                        // is also a 2-digit or matching unpadded value without ambiguity.
++                        try {
++                            result = id.getMnc() != null
++                                    && id.getMnc().length() <= 2
++                                    && Integer.parseInt(value) == Integer.parseInt(id.getMnc());
++                        } catch (NumberFormatException ignored) {
++                            result = false;
++                        }
++                    }
+                     break;
+                 case "gid1":
+                     result = (id == null) || value.equalsIgnoreCase(id.getGid1());

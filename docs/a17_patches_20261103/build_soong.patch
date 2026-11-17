@@ -1,0 +1,13 @@
+diff --git a/scripts/check_boot_jars/package_allowed_list.txt b/scripts/check_boot_jars/package_allowed_list.txt
+index 970bb12..25fcccf 100644
+--- a/scripts/check_boot_jars/package_allowed_list.txt
++++ b/scripts/check_boot_jars/package_allowed_list.txt
+@@ -258,3 +258,8 @@ qcom.fmradio
+ ###################################################
+ # IFAA Manager used for Alipay and/or WeChat payment
+ org\.ifaa\.android\.manager.*
++
++###################################################
++# MediaTek IN Note 1 (yogurt) vendor boot jar (mediatek-framework.jar)
++com\.antaiui
++com\.antaiui\.internal

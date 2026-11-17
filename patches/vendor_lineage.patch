@@ -1,0 +1,90 @@
+diff --git a/build/envsetup.sh b/build/envsetup.sh
+index a284b09..c7aaf52 100644
+--- a/build/envsetup.sh
++++ b/build/envsetup.sh
+@@ -12,8 +12,8 @@ function check_product()
+         echo "Couldn't locate the top of the tree. Try setting TOP." >&2
+         return
+     fi
+-    if (echo -n $1 | grep -q -e "^lineage_") ; then
+-        LINEAGE_BUILD=$(echo -n $1 | sed -e 's/^lineage_//g')
++    if (echo -n $1 | grep -q -E "^(lineage|derp)_") ; then
++        LINEAGE_BUILD=$(echo -n $1 | sed -E 's/^(lineage|derp)_//g')
+     else
+         LINEAGE_BUILD=
+     fi
+@@ -774,7 +774,7 @@ function build_kernel() {
+ 
+ function generate_host_overrides() {
+     export BUILD_USERNAME=android-build
+-    export BUILD_HOSTNAME=$(openssl rand -hex 6)
++    export BUILD_HOSTNAME="r-derpfest-yogurt"
+     echo "BUILD_USERNAME=$BUILD_USERNAME"
+     echo "BUILD_HOSTNAME=$BUILD_HOSTNAME"
+ }
+diff --git a/config/common.mk b/config/common.mk
+index bdc1d27..7db6064 100644
+--- a/config/common.mk
++++ b/config/common.mk
+@@ -10,6 +10,7 @@ PRODUCT_SOURCE_ROOT_DIRS += -prebuilts/misc/protobuf_vendorcompat
+ -include $(sort $(wildcard vendor/*/*/exclude-bp.mk))
+ 
+ PRODUCT_BRAND ?= DerpFest
++LINEAGE_BUILD ?= $(PRODUCT_DEVICE)
+ 
+ # Call recording
+ TARGET_CALL_RECORDING_SUPPORTED ?= true
+diff --git a/config/derpfest.mk b/config/derpfest.mk
+index a437245..0c6eb9e 100644
+--- a/config/derpfest.mk
++++ b/config/derpfest.mk
+@@ -67,7 +67,6 @@ endif
+ $(call inherit-product-if-exists, packages/apps/AccessCard/config/accesscard.mk)
+ 
+ PRODUCT_PACKAGES += \
+-    ANGLE \
+     AxThemeStore \
+     BatteryStatsViewer \
+     DerpWalls \
+@@ -75,17 +74,10 @@ PRODUCT_PACKAGES += \
+     GameSpace \
+     LMOFreeform \
+     LMOFreeformSidebar \
+-    LMOSystemUIClock \
+     Miniature \
+-    OmniStyle \
+     Prospect \
+     SystemUIFundamental
+ 
+-# Google Pixel Weather
+-PRODUCT_PACKAGES += \
+-    WeatherPixelPrebuilt_10006113 \
+-    default-permissions_pixelweather
+-
+ # ColumbusService
+ ifneq ($(TARGET_SUPPORTS_QUICK_TAP),false)
+ PRODUCT_PACKAGES += \
+@@ -103,9 +95,6 @@ ifeq ($(TARGET_FACE_UNLOCK_SUPPORTED),true)
+         ro.face.sense_service=true
+     PRODUCT_COPY_FILES += \
+         frameworks/native/data/etc/android.hardware.biometrics.face.xml:$(TARGET_COPY_OUT_SYSTEM_EXT)/etc/permissions/android.hardware.biometrics.face.xml
+-else
+-    PRODUCT_PACKAGES += \
+-        SettingsGoogleFutureFaceEnroll
+ endif
+ endif
+ 
+diff --git a/tools/generate_json_build_info.sh b/tools/generate_json_build_info.sh
+index 49cfd87..d752fd7 100755
+--- a/tools/generate_json_build_info.sh
++++ b/tools/generate_json_build_info.sh
+@@ -19,6 +19,9 @@ if [[ -f "$file_path" ]]; then
+     echo "Generating .json"
+     file_name=$(basename "$file_path")
+     device_name=$(echo "$file_name" | cut -d'-' -f4)
++    if [[ -z "$device_name" || "$device_name" == *"zip"* || "$device_name" == "$file_name" ]]; then
++        device_name="${TARGET_DEVICE:-yogurt}"
++    fi
+     
+     # Set output directory with fallback
+     out_dir="${OUT_DIR:-out}"

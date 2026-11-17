@@ -1,0 +1,112 @@
+diff --git a/KeyUtil.cpp b/KeyUtil.cpp
+index 805776c..332f358 100644
+--- a/KeyUtil.cpp
++++ b/KeyUtil.cpp
+@@ -24,8 +24,11 @@
+ #include <fcntl.h>
+ #include <linux/blk-crypto.h>
+ #include <linux/fscrypt.h>
++#include <linux/keyctl.h>
+ #include <openssl/sha.h>
+ #include <sys/ioctl.h>
++#include <sys/syscall.h>
++#include <unistd.h>
+ 
+ #include <android-base/file.h>
+ #include <android-base/logging.h>
+@@ -260,6 +263,54 @@ static bool buildKeySpecifier(fscrypt_key_specifier* spec, const EncryptionPolic
+     }
+ }
+ 
++// Prefix for keys in the legacy process keyring (fscrypt v1 on 4.14 kernels)
++static const char* const kKeyPrefixes[] = {"ext4", "f2fs", "fscrypt", nullptr};
++
++static bool fscryptKeyring(int32_t* device_keyring) {
++    long id = syscall(__NR_keyctl, KEYCTL_SEARCH, KEY_SPEC_SESSION_KEYRING, "keyring", "fscrypt", 0);
++    if (id < 0) {
++        id = syscall(__NR_keyctl, KEYCTL_SEARCH, KEY_SPEC_USER_SESSION_KEYRING, "keyring",
++                     "fscrypt", 0);
++    }
++    if (id < 0) {
++        PLOG(ERROR) << "Unable to find device keyring";
++        return false;
++    }
++    *device_keyring = static_cast<int32_t>(id);
++    return true;
++}
++
++static bool installKeyLegacy(const KeyBuffer& key, const std::string& raw_ref) {
++    // Place fscrypt_key into automatically zeroing buffer.
++    KeyBuffer fs_key_buf(sizeof(fscrypt_key));
++    fscrypt_key& fs_key = *reinterpret_cast<fscrypt_key*>(fs_key_buf.data());
++
++    if (key.size() > sizeof(fs_key.raw)) {
++        LOG(ERROR) << "Key too long: " << key.size();
++        return false;
++    }
++    fs_key.mode = FS_ENCRYPTION_MODE_AES_256_XTS;
++    fs_key.size = key.size();
++    memset(fs_key.raw, 0, sizeof(fs_key.raw));
++    memcpy(fs_key.raw, key.data(), key.size());
++
++    int32_t device_keyring;
++    if (!fscryptKeyring(&device_keyring)) return false;
++    std::string ref = keyrefstring(raw_ref);
++    for (unsigned int i = 0; kKeyPrefixes[i] != nullptr; i++) {
++        std::string keyref = std::string(kKeyPrefixes[i]) + ":" + ref;
++        long key_id = syscall(__NR_add_key, "logon", keyref.c_str(), &fs_key, sizeof(fs_key),
++                              device_keyring);
++        if (key_id < 0) {
++            PLOG(ERROR) << "Failed to insert key into keyring " << device_keyring;
++            return false;
++        }
++        LOG(DEBUG) << "Added key " << key_id << " (" << keyref << ") to keyring " << device_keyring
++                   << " in process " << getpid();
++    }
++    return true;
++}
++
+ bool installKey(const std::string& mountpoint, const EncryptionOptions& options,
+                 const KeyBuffer& key, EncryptionPolicy* policy) {
+     const std::lock_guard<std::mutex> lock(fscrypt_keyring_mutex);
+@@ -283,10 +334,10 @@ bool installKey(const std::string& mountpoint, const EncryptionOptions& options,
+             } else {
+                 policy->key_raw_ref = generateKeyRef((const uint8_t*)key.data(), key.size());
+             }
+-            if (!buildKeySpecifier(&arg->key_spec, *policy)) {
+-                return false;
+-            }
+-            break;
++            if (!installKeyLegacy(key, policy->key_raw_ref)) return false;
++            LOG(DEBUG) << "Installed v1 fscrypt key with ref " << keyrefstring(policy->key_raw_ref)
++                       << " to process keyring for " << mountpoint;
++            return true;
+         case 2:
+             // A key for a v2 policy is specified by an 16-byte "identifier",
+             // which is a cryptographic hash of the key itself which the kernel
+@@ -403,6 +454,25 @@ static void waitForBusyFiles(const struct fscrypt_key_specifier key_spec, const
+ bool evictKey(const std::string& mountpoint, const EncryptionPolicy& policy) {
+     const std::lock_guard<std::mutex> lock(fscrypt_keyring_mutex);
+ 
++    if (policy.options.version == 1) {
++        int32_t device_keyring;
++        if (!fscryptKeyring(&device_keyring)) return false;
++        std::string ref = keyrefstring(policy.key_raw_ref);
++        bool success = true;
++        for (unsigned int i = 0; kKeyPrefixes[i] != nullptr; i++) {
++            std::string keyref = std::string(kKeyPrefixes[i]) + ":" + ref;
++            long key_id = syscall(__NR_keyctl, KEYCTL_SEARCH, device_keyring, "logon",
++                                  keyref.c_str(), 0);
++            if (syscall(__NR_keyctl, KEYCTL_UNLINK, key_id, device_keyring) != 0) {
++                PLOG(ERROR) << "Failed to unlink key with serial " << key_id << " ref " << keyref;
++                success = false;
++            } else {
++                LOG(DEBUG) << "Unlinked key with serial " << key_id << " ref " << keyref;
++            }
++        }
++        return success;
++    }
++
+     android::base::unique_fd fd(open(mountpoint.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC));
+     if (fd == -1) {
+         PLOG(ERROR) << "Failed to open " << mountpoint << " to evict key";

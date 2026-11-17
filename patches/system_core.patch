@@ -1,0 +1,224 @@
+diff --git a/init/builtins.cpp b/init/builtins.cpp
+index 2e4a3b4..6ea50eb 100644
+--- a/init/builtins.cpp
++++ b/init/builtins.cpp
+@@ -641,6 +641,27 @@ static Result<void> do_mount_all(const BuiltinArguments& args) {
+         }
+     }
+ 
++    // If recovery wiped /data as ext4 (without fscrypt support) when fstab expects f2fs,
++    // zero the ext4 superblock so fs_mgr_mount_all detects partition_wiped() and formats f2fs.
++    for (const auto& entry : fstab) {
++        if (entry.mount_point == "/data" && entry.fs_type == "f2fs" &&
++            entry.fs_mgr_flags.formattable) {
++            android::base::unique_fd fd(
++                    TEMP_FAILURE_RETRY(open(entry.blk_device.c_str(), O_RDWR | O_CLOEXEC)));
++            if (fd.get() >= 0) {
++                uint16_t magic = 0;
++                if (pread(fd.get(), &magic, sizeof(magic), 1024 + 0x38) == sizeof(magic) &&
++                    magic == 0xEF53) {
++                    LOG(WARNING) << "Detected recovery ext4 superblock on f2fs /data ("
++                                 << entry.blk_device << "); zeroing superblock for f2fs format";
++                    std::vector<uint8_t> zeros(65536, 0);
++                    pwrite(fd.get(), zeros.data(), zeros.size(), 0);
++                    fsync(fd.get());
++                }
++            }
++        }
++    }
++
+     auto mount_fstab_result = fs_mgr_mount_all(&fstab, mount_all->mode);
+     SetProperty(prop_name, std::to_string(t.duration().count()));
+ 
+diff --git a/init/init.cpp b/init/init.cpp
+index aec2688..168432f 100644
+--- a/init/init.cpp
++++ b/init/init.cpp
+@@ -22,10 +22,12 @@
+ #include <pthread.h>
+ #include <signal.h>
+ #include <stdlib.h>
++#include <linux/keyctl.h>
+ #include <string.h>
+ #include <sys/eventfd.h>
+ #include <sys/mount.h>
+ #include <sys/signalfd.h>
++#include <sys/syscall.h>
+ #include <sys/system_properties.h>
+ #include <sys/types.h>
+ #include <sys/utsname.h>
+@@ -1140,6 +1142,27 @@ int SecondStageMain(int argc, char** argv) {
+     SelabelInitialize();
+     SelinuxRestoreContext();
+ 
++    // Initialize the legacy fscrypt session keyring for fscrypt v1 (Linux 4.14 kernels).
++    {
++        long session_keyring =
++                syscall(__NR_keyctl, KEYCTL_GET_KEYRING_ID, KEY_SPEC_SESSION_KEYRING, 1);
++        if (session_keyring < 0) {
++            PLOG(ERROR) << "keyctl_get_keyring_ID(KEY_SPEC_SESSION_KEYRING, 1) failed";
++        } else {
++            long device_keyring = syscall(__NR_add_key, "keyring", "fscrypt", nullptr, 0,
++                                          KEY_SPEC_SESSION_KEYRING);
++            if (device_keyring < 0) {
++                PLOG(ERROR) << "Failed to add fscrypt keyring";
++            } else {
++                if (syscall(__NR_keyctl, KEYCTL_SETPERM, device_keyring, 0x1f3f0000) < 0) {
++                    PLOG(ERROR) << "Failed to setperm on fscrypt keyring";
++                }
++                syscall(__NR_keyctl, KEYCTL_LINK, device_keyring, KEY_SPEC_USER_SESSION_KEYRING);
++                LOG(INFO) << "Initialized fscrypt root keyring (id=" << device_keyring << ")";
++            }
++        }
++    }
++
+     Epoll epoll;
+     if (auto result = epoll.Open(); !result.ok()) {
+         PLOG(FATAL) << result.error();
+diff --git a/init/service.cpp b/init/service.cpp
+index e761285..6de968f 100644
+--- a/init/service.cpp
++++ b/init/service.cpp
+@@ -280,7 +280,37 @@ void Service::SetProcessAttributesAndCaps(InterprocessFifo setsid_finished) {
+     }
+ }
+ 
++static void DumpKmsgToMetadata(const std::string& reason) {
++    int out_fd = open("/metadata/bootstat/kmsg_dump.txt", O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0666);
++    if (out_fd < 0) return;
++    std::string header = "\n=== DIAG: " + reason + " ===\n";
++    if (!android::base::WriteFully(out_fd, header.data(), header.size())) {
++        close(out_fd);
++        return;
++    }
++    int kmsg_fd = open("/dev/kmsg", O_RDONLY | O_NONBLOCK | O_CLOEXEC);
++    if (kmsg_fd >= 0) {
++        char buf[4096];
++        int count = 0;
++        while (count < 4000) {
++            ssize_t n = read(kmsg_fd, buf, sizeof(buf));
++            if (n <= 0) break;
++            if (!android::base::WriteFully(out_fd, buf, n)) break;
++            count++;
++        }
++        close(kmsg_fd);
++    }
++    fsync(out_fd);
++    close(out_fd);
++    sync();
++}
++
+ void Service::Reap(const siginfo_t& siginfo) {
++    if ((siginfo.si_code != CLD_EXITED || siginfo.si_status != 0) && on_failure_reboot_target_) {
++        DumpKmsgToMetadata("Reap service=" + name_ + " target=" + *on_failure_reboot_target_ +
++                           " si_code=" + std::to_string(siginfo.si_code) +
++                           " si_status=" + std::to_string(siginfo.si_status));
++    }
+     if (!(flags_ & SVC_ONESHOT) || (flags_ & SVC_RESTART)) {
+         KillProcessGroup(SIGKILL);
+     } else {
+@@ -448,6 +478,7 @@ void Service::DumpState() const {
+ Result<void> Service::ExecStart() {
+     auto reboot_on_failure = make_scope_guard([this] {
+         if (on_failure_reboot_target_) {
++            DumpKmsgToMetadata("ExecStart failed service=" + name_ + " target=" + *on_failure_reboot_target_);
+             trigger_shutdown(*on_failure_reboot_target_);
+         }
+     });
+@@ -609,6 +640,8 @@ void Service::RunService(const std::vector<Descriptor>& descriptors,
+ Result<void> Service::Start() {
+     auto reboot_on_failure = make_scope_guard([this] {
+         if (on_failure_reboot_target_) {
++            DumpKmsgToMetadata("Start failed service=" + name_ + " arg0=" + (args_.empty() ? "" : args_[0]) +
++                               " target=" + *on_failure_reboot_target_);
+             trigger_shutdown(*on_failure_reboot_target_);
+         }
+     });
+diff --git a/libcutils/ashmem-dev.cpp b/libcutils/ashmem-dev.cpp
+index 4d3a70a..a657be0 100644
+--- a/libcutils/ashmem-dev.cpp
++++ b/libcutils/ashmem-dev.cpp
+@@ -195,28 +195,28 @@ static int __ashmem_check_failure(int fd, int result) {
+ }
+ 
+ static bool is_memfd_fd(int fd) {
+-    std::string fd_path = android::base::StringPrintf("/proc/self/fd/%d", fd);
+-    std::string result;
+-    if (!android::base::Readlink(fd_path, &result)) {
+-        ALOGE("readlink(%s) failed: %m", fd_path.c_str());
++    // Check sealing first: F_GET_SEALS succeeds only on sealable shmem/memfd fds,
++    // avoiding /proc/self/fd readlink calls that fail with EPERM in !dumpable sandboxes.
++    int seals = fcntl(fd, F_GET_SEALS);
++    if (seals == -1) {
+         return false;
+     }
+ 
+-    if (!result.starts_with("/memfd:")) {
++    if ((seals & (F_SEAL_GROW | F_SEAL_SHRINK)) != (F_SEAL_GROW | F_SEAL_SHRINK)) {
+         return false;
+     }
+ 
+-    // b/498720726: Ensure that the memfd has the same restrictions on its size that an ashmem fd
+-    // would. Otherwise, memfds that aren't sealed against size changes can be treated as valid
+-    // ashmem fds. The size of the memory associated with those fds can then be changed while a
+-    // process is using it, leading to time of check to time of use issues.
+-    int seals = fcntl(fd, F_GET_SEALS);
+-    if (seals == -1) {
+-        ALOGE("is_memfd_fd(%d): F_GET_SEALS failed: %m", fd);
++    std::string fd_path = android::base::StringPrintf("/proc/self/fd/%d", fd);
++    std::string result;
++    if (!android::base::Readlink(fd_path, &result)) {
++        if (errno == EACCES || errno == EPERM) {
++            return true;
++        }
++        ALOGE("readlink(%s) failed: %m", fd_path.c_str());
+         return false;
+     }
+ 
+-    if ((seals & (F_SEAL_GROW | F_SEAL_SHRINK)) != (F_SEAL_GROW | F_SEAL_SHRINK)) {
++    if (!result.starts_with("/memfd:")) {
+         return false;
+     }
+ 
+diff --git a/libprocessgroup/profiles/cgroups.json b/libprocessgroup/profiles/cgroups.json
+index e9345a5..85b9e2b 100644
+--- a/libprocessgroup/profiles/cgroups.json
++++ b/libprocessgroup/profiles/cgroups.json
+@@ -5,21 +5,24 @@
+       "Path": "/dev/blkio",
+       "Mode": "0775",
+       "UID": "system",
+-      "GID": "system"
++      "GID": "system",
++      "Optional": true
+     },
+     {
+       "Controller": "cpu",
+       "Path": "/dev/cpuctl",
+       "Mode": "0755",
+       "UID": "system",
+-      "GID": "system"
++      "GID": "system",
++      "Optional": true
+     },
+     {
+       "Controller": "cpuset",
+       "Path": "/dev/cpuset",
+       "Mode": "0755",
+       "UID": "system",
+-      "GID": "system"
++      "GID": "system",
++      "Optional": true
+     }
+   ],
+   "Cgroups2": {
+@@ -30,7 +33,8 @@
+     "Controllers": [
+       {
+         "Controller": "freezer",
+-        "Path": "."
++        "Path": ".",
++        "Optional": true
+       },
+       {
+         "Controller": "memory",

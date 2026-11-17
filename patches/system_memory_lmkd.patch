@@ -1,0 +1,62 @@
+diff --git a/lmkd.cpp b/lmkd.cpp
+index 4bac215..9275bb3 100644
+--- a/lmkd.cpp
++++ b/lmkd.cpp
+@@ -1204,7 +1204,7 @@ static void register_oom_adj_proc(const struct lmk_procprio& proc, struct ucred*
+     procp = pid_lookup(proc.pid);
+     if (!procp) {
+         int pidfd = TEMP_FAILURE_RETRY(pidfd_open(proc.pid, 0));
+-        if (pidfd < 0) {
++        if (pidfd < 0 && errno != ENOSYS) {
+             ALOGE("pidfd_open for pid %d failed; errno=%d", proc.pid, errno);
+             return;
+         }
+@@ -1212,7 +1212,9 @@ static void register_oom_adj_proc(const struct lmk_procprio& proc, struct ucred*
+         procp = new (std::nothrow) struct proc();
+         if (!procp) {
+             // Oh, the irony.  May need to rebuild our state.
+-            close(pidfd);
++            if (pidfd >= 0) {
++                close(pidfd);
++            }
+             return;
+         }
+ 
+@@ -2540,10 +2542,14 @@ static int kill_one_process(struct proc* procp, int min_oom_score, struct kill_i
+       ALOGI("Skipping kill; %ld kB freed elsewhere.", result * page_k);
+       return result;
+     }
+-    start_wait_for_proc_kill(pidfd < 0 ? pid : pidfd);
++    if (pidfd >= 0) {
++        start_wait_for_proc_kill(pidfd);
++    }
+ 
+     if (!reaper.kill({ pidfd, procp->cgroupfd, pid, uid }, false)) {
+-        stop_wait_for_proc_kill(false);
++        if (pidfd >= 0) {
++            stop_wait_for_proc_kill(false);
++        }
+         ALOGE("kill(%d): errno=%d", pid, errno);
+         /* Delete process record even when we fail to kill so that we don't get stuck on it */
+         goto out;
+diff --git a/reaper.cpp b/reaper.cpp
+index 69b6a5e..6bb7581 100644
+--- a/reaper.cpp
++++ b/reaper.cpp
+@@ -147,11 +147,14 @@ static bool kill_cgroup_or_process(const Reaper::target_proc& target) {
+                 return true;
+             },
+         }, *target.cgroupfd)) {
+-        // Fallback to pidfd kill
++        // Fallback to pidfd kill (or kill(pid, SIGKILL) on kernels without pidfd_open)
+         // Most, *but not all* processes are in their own cgroups managed by Android, for example
+         // children of adbd. For these processes, the best thing we can do is kill the individual
+         // process since we don't want to kill the entire cgroup.
+-        return pidfd_send_signal(target.pidfd, SIGKILL, NULL, 0) == 0;
++        if (target.pidfd >= 0) {
++            return pidfd_send_signal(target.pidfd, SIGKILL, NULL, 0) == 0;
++        }
++        return ::kill(target.pid, SIGKILL) == 0;
+     }
+ 
+     return true;

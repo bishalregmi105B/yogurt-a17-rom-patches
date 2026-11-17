@@ -1,0 +1,31 @@
+diff --git a/cap/src/lib.rs b/cap/src/lib.rs
+index c534d7c..484b437 100644
+--- a/cap/src/lib.rs
++++ b/cap/src/lib.rs
+@@ -607,7 +607,12 @@ pub fn cap_within_bound(cap: Capability) -> Result<bool> {
+     // SAFETY: This function takes no pointers and return value is checked and
+     //         wrapped in a `Result<bool>` type.
+     match unsafe { cap_bindgen::cap_get_bound(cap as cap_bindgen::cap_value_t) } {
+-        -1 => Err(CapabilityError::GetCapBoundFailure(Errno::last())),
++        -1 => match Errno::last() {
++            // Older kernels (e.g. 4.14) have a lower CAP_LAST_CAP and return
++            // EINVAL for newer capability bits such as CAP_PERFMON/BPF/CHECKPOINT_RESTORE.
++            Errno::EINVAL => Ok(false),
++            err => Err(CapabilityError::GetCapBoundFailure(err)),
++        },
+         ret => Ok(ret > 0),
+     }
+ }
+@@ -649,7 +654,11 @@ pub fn drop_inheritable_caps() -> Result<()> {
+ /// See: https://man7.org/linux/man-pages/man7/capabilities.7.html
+ pub fn drop_bounding_set() -> Result<()> {
+     for cap_id in 0u32..=CAP_LAST_CAP {
+-        cap_drop_bound(Capability::try_from(cap_id)?)?;
++        if let Err(err) = cap_drop_bound(Capability::try_from(cap_id)?)
++            && !matches!(err, CapabilityError::DropFailure(Errno::EINVAL))
++        {
++            return Err(err);
++        }
+     }
+ 
+     Ok(())

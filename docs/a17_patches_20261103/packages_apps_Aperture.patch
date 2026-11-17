@@ -1,0 +1,59 @@
+diff --git a/app/src/main/java/org/lineageos/aperture/CameraActivity.kt b/app/src/main/java/org/lineageos/aperture/CameraActivity.kt
+index 9d51ad1..943530f 100644
+--- a/app/src/main/java/org/lineageos/aperture/CameraActivity.kt
++++ b/app/src/main/java/org/lineageos/aperture/CameraActivity.kt
+@@ -91,6 +91,9 @@ import org.lineageos.aperture.ext.setDistortionCorrectionMode
+ import org.lineageos.aperture.ext.setEdgeMode
+ import org.lineageos.aperture.ext.setFrameRate
+ import org.lineageos.aperture.ext.setHotPixelMode
++import org.lineageos.aperture.ext.setMtkAisStabilization
++import org.lineageos.aperture.ext.setMtkMfbMode
++import org.lineageos.aperture.ext.setMtkVideoEis
+ import org.lineageos.aperture.ext.setNoiseReductionMode
+ import org.lineageos.aperture.ext.setPadding
+ import org.lineageos.aperture.ext.setShadingMode
+@@ -1653,6 +1656,27 @@ open class CameraActivity : AppCompatActivity(R.layout.activity_camera) {
+                 .setColorCorrectionAberrationMode(camera2Options.colorCorrectionAberrationMode)
+                 .setDistortionCorrectionMode(camera2Options.distortionCorrectionMode)
+                 .setHotPixelMode(camera2Options.hotPixelMode)
++                .setMtkMfbMode(
++                    cameraConfiguration.camera.cameraCharacteristics,
++                    when (cameraConfiguration) {
++                        is CameraConfiguration.Photo -> org.lineageos.aperture.models.MtkMfbMode.AUTO
++                        else -> null
++                    }
++                )
++                .setMtkAisStabilization(
++                    cameraConfiguration.camera.cameraCharacteristics,
++                    when (cameraConfiguration) {
++                        is CameraConfiguration.Photo -> true
++                        else -> null
++                    }
++                )
++                .setMtkVideoEis(
++                    cameraConfiguration.camera.cameraCharacteristics,
++                    when (cameraConfiguration) {
++                        is CameraConfiguration.Video -> cameraConfiguration.enableVideoStabilization
++                        else -> null
++                    }
++                )
+                 .build()
+             )
+         }
+diff --git a/app/src/main/java/org/lineageos/aperture/models/Camera.kt b/app/src/main/java/org/lineageos/aperture/models/Camera.kt
+index 0847e6f..f09c1dd 100644
+--- a/app/src/main/java/org/lineageos/aperture/models/Camera.kt
++++ b/app/src/main/java/org/lineageos/aperture/models/Camera.kt
+@@ -51,6 +51,12 @@ class Camera private constructor(
+      */
+     private val camera2CameraInfo: Camera2CameraInfo = Camera2CameraInfo.from(cameraInfo)
+ 
++    /**
++     * Extracted [CameraCharacteristics] for vendor-pipeline key queries.
++     */
++    val cameraCharacteristics: CameraCharacteristics =
++        Camera2CameraInfo.extractCameraCharacteristics(cameraInfo)
++
+     /**
+      * Camera2's camera ID.
+      */

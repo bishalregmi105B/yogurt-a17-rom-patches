@@ -1,0 +1,31 @@
+diff --git a/src/com/android/providers/downloads/Helpers.java b/src/com/android/providers/downloads/Helpers.java
+index aca9761..cac86f6 100644
+--- a/src/com/android/providers/downloads/Helpers.java
++++ b/src/com/android/providers/downloads/Helpers.java
+@@ -179,10 +179,15 @@ public class Helpers {
+         final JobInfo.Builder builder = new JobInfo.Builder(jobId,
+                 new ComponentName(context, DownloadJobService.class));
+ 
++        // We might have a backoff constraint due to errors
++        final long latency = info.getMinimumLatency();
++
+         // When this download will show a notification, run with a higher
+-        // bias, since it's effectively a foreground service
++        // bias, since it's effectively a foreground service.
++        // JobInfo disallows setUserInitiated(true) alongside setMinimumLatency(latency > 0).
+         if (info.isVisible()) {
+-            if (Flags.setVisibleDownloadsAsUidt()
++            if (latency <= 0
++                    && Flags.setVisibleDownloadsAsUidt()
+                     && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
+                     && canCallerRunUserInitiatedJobs(context, info)) {
+                 builder.setUserInitiated(true);
+@@ -192,8 +197,6 @@ public class Helpers {
+             }
+         }
+ 
+-        // We might have a backoff constraint due to errors
+-        final long latency = info.getMinimumLatency();
+         if (latency > 0) {
+             builder.setMinimumLatency(latency);
+         }

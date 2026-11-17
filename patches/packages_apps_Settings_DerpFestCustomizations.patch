@@ -1,0 +1,20 @@
+diff --git a/res/values/arrays.xml b/res/values/arrays.xml
+index 3304792..57d83bb 100644
+--- a/res/values/arrays.xml
++++ b/res/values/arrays.xml
+@@ -445,6 +445,7 @@
+         <item>OP13</item>
+         <item>OP8P5G</item>
+         <item>PXL</item>
++        <item>PXL10P</item>
+         <item>PXL10PXL</item>
+         <item>RM9P</item>
+         <item>RM10P</item>
+@@ -473,6 +474,7 @@
+         <item>OnePlus 13</item>
+         <item>OnePlus 8 Pro 5G</item>
+         <item>Pixel XL</item>
++        <item>Pixel 10 Pro</item>
+         <item>Pixel 10 Pro XL</item>
+         <item>REDMAGIC 9 Pro</item>
+         <item>RedMagic 10 Pro</item>

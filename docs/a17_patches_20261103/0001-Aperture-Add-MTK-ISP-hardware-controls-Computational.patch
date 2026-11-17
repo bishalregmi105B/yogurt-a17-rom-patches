@@ -1,0 +1,388 @@
+From b37cc3dd8afb143804d81b5696247851228b4e14 Mon Sep 17 00:00:00 2001
+From: Bishal Regmi <89974678+bishalregmi105B@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 22:06:50 +0545
+Subject: [PATCH] Aperture: Add MTK ISP hardware controls & Computational
+ Photography styles (Pixel HDR+, Hasselblad, TrueLens)
+
+Change-Id: I2a4d423e15d0da7d6d1ecfc140133a008b5699af
+---
+ .../org/lineageos/aperture/CameraActivity.kt  |  32 +++
+ .../aperture/ext/MtkRequestOptions.kt         | 246 ++++++++++++++++++
+ .../org/lineageos/aperture/models/Camera.kt   |   6 +
+ .../lineageos/aperture/models/MtkFeature.kt   |  44 ++++
+ 4 files changed, 328 insertions(+)
+ create mode 100644 app/src/main/java/org/lineageos/aperture/ext/MtkRequestOptions.kt
+ create mode 100644 app/src/main/java/org/lineageos/aperture/models/MtkFeature.kt
+
+diff --git a/app/src/main/java/org/lineageos/aperture/CameraActivity.kt b/app/src/main/java/org/lineageos/aperture/CameraActivity.kt
+index 9d51ad1..c98dbe1 100644
+--- a/app/src/main/java/org/lineageos/aperture/CameraActivity.kt
++++ b/app/src/main/java/org/lineageos/aperture/CameraActivity.kt
+@@ -91,6 +91,10 @@ import org.lineageos.aperture.ext.setDistortionCorrectionMode
+ import org.lineageos.aperture.ext.setEdgeMode
+ import org.lineageos.aperture.ext.setFrameRate
+ import org.lineageos.aperture.ext.setHotPixelMode
++import org.lineageos.aperture.ext.setMtkAisStabilization
++import org.lineageos.aperture.ext.setMtkMfbMode
++import org.lineageos.aperture.ext.setMtkVideoEis
++import org.lineageos.aperture.ext.setComputationalStyle
+ import org.lineageos.aperture.ext.setNoiseReductionMode
+ import org.lineageos.aperture.ext.setPadding
+ import org.lineageos.aperture.ext.setShadingMode
+@@ -1653,6 +1657,34 @@ open class CameraActivity : AppCompatActivity(R.layout.activity_camera) {
+                 .setColorCorrectionAberrationMode(camera2Options.colorCorrectionAberrationMode)
+                 .setDistortionCorrectionMode(camera2Options.distortionCorrectionMode)
+                 .setHotPixelMode(camera2Options.hotPixelMode)
++                .setMtkMfbMode(
++                    cameraConfiguration.camera.cameraCharacteristics,
++                    when (cameraConfiguration) {
++                        is CameraConfiguration.Photo -> org.lineageos.aperture.models.MtkMfbMode.AUTO
++                        else -> null
++                    }
++                )
++                .setMtkAisStabilization(
++                    cameraConfiguration.camera.cameraCharacteristics,
++                    when (cameraConfiguration) {
++                        is CameraConfiguration.Photo -> true
++                        else -> null
++                    }
++                )
++                .setMtkVideoEis(
++                    cameraConfiguration.camera.cameraCharacteristics,
++                    when (cameraConfiguration) {
++                        is CameraConfiguration.Video -> cameraConfiguration.enableVideoStabilization
++                        else -> null
++                    }
++                )
++                .setComputationalStyle(
++                    cameraConfiguration.camera.cameraCharacteristics,
++                    when (cameraConfiguration) {
++                        is CameraConfiguration.Photo -> org.lineageos.aperture.models.ComputationalStyle.PIXEL_HDR
++                        else -> null
++                    }
++                )
+                 .build()
+             )
+         }
+diff --git a/app/src/main/java/org/lineageos/aperture/ext/MtkRequestOptions.kt b/app/src/main/java/org/lineageos/aperture/ext/MtkRequestOptions.kt
+new file mode 100644
+index 0000000..883a3ff
+--- /dev/null
++++ b/app/src/main/java/org/lineageos/aperture/ext/MtkRequestOptions.kt
+@@ -0,0 +1,246 @@
++/*
++ * SPDX-FileCopyrightText: The LineageOS Project
++ * SPDX-License-Identifier: Apache-2.0
++ *
++ * yogurt PRO extension — MTK vendor-pipeline capture controls.
++ * STAGED (merge AFTER first build exits, before cycle-2 app build).
++ * All writes are dynamic-key: if the vendor tag is absent on the active
++ * camera, every setter is a NO-OP — toggles OFF (or unsupported HAL) =
++ * pixel-identical upstream behavior (acceptance battery §7 of plan).
++ */
++
++package org.lineageos.aperture.ext
++
++import android.hardware.camera2.CameraCharacteristics
++import android.hardware.camera2.CameraMetadata
++import android.hardware.camera2.CaptureRequest
++import android.hardware.camera2.params.TonemapCurve
++import androidx.camera.camera2.interop.CaptureRequestOptions
++import org.lineageos.aperture.models.ComputationalStyle
++import org.lineageos.aperture.models.MtkMfbMode
++import org.lineageos.aperture.models.MtkTurboLevel
++
++private fun List<CaptureRequest.Key<*>>.named(vararg needles: String): CaptureRequest.Key<*>? =
++    firstOrNull { key -> needles.any { key.name.endsWith(it) || key.name.contains(it) } }
++
++private fun requestsFrom(characteristics: CameraCharacteristics): List<CaptureRequest.Key<*>> =
++    characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_SESSION_KEYS).orEmpty() +
++        characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_REQUEST_KEYS).orEmpty()
++
++private fun findKey(characteristics: CameraCharacteristics, name: String): CaptureRequest.Key<*>? =
++    requestsFrom(characteristics).named(name)
++
++@androidx.camera.camera2.interop.ExperimentalCamera2Interop
++private fun CaptureRequestOptions.Builder.putNumeric(
++    key: CaptureRequest.Key<*>,
++    value: Int,
++): CaptureRequestOptions.Builder {
++    when (key.type) {
++        java.lang.Byte::class.java -> {
++            @Suppress("UNCHECKED_CAST")
++            setCaptureRequestOption(key as CaptureRequest.Key<Byte>, value.toByte())
++        }
++
++        java.lang.Integer::class.java -> {
++            @Suppress("UNCHECKED_CAST")
++            setCaptureRequestOption(key as CaptureRequest.Key<Int>, value)
++        }
++    }
++    return this
++}
++
++@androidx.camera.camera2.interop.ExperimentalCamera2Interop
++private fun CaptureRequestOptions.Builder.clearNumeric(
++    key: CaptureRequest.Key<*>,
++): CaptureRequestOptions.Builder {
++    when (key.type) {
++        java.lang.Byte::class.java -> {
++            @Suppress("UNCHECKED_CAST")
++            clearCaptureRequestOption(key as CaptureRequest.Key<Byte>)
++        }
++
++        java.lang.Integer::class.java -> {
++            @Suppress("UNCHECKED_CAST")
++            clearCaptureRequestOption(key as CaptureRequest.Key<Int>)
++        }
++    }
++    return this
++}
++
++@androidx.camera.camera2.interop.ExperimentalCamera2Interop
++private fun CaptureRequestOptions.Builder.putBooleanish(
++    key: CaptureRequest.Key<*>,
++    enabled: Boolean,
++): CaptureRequestOptions.Builder = putNumeric(key, if (enabled) 1 else 0)
++
++@androidx.camera.camera2.interop.ExperimentalCamera2Interop
++fun CaptureRequestOptions.Builder.setMtkMfbMode(
++    characteristics: CameraCharacteristics,
++    mode: MtkMfbMode?,
++): CaptureRequestOptions.Builder {
++    val key = findKey(characteristics, "mfbmode") ?: return this
++    mode?.let { putNumeric(key, it.id) } ?: clearNumeric(key)
++    return this
++}
++
++@androidx.camera.camera2.interop.ExperimentalCamera2Interop
++fun CaptureRequestOptions.Builder.setMtkAisStabilization(
++    characteristics: CameraCharacteristics,
++    enabled: Boolean?,
++): CaptureRequestOptions.Builder {
++    val key = findKey(characteristics, "aismode") ?: return this
++    enabled?.let { putBooleanish(key, it) } ?: clearNumeric(key)
++    return this
++}
++
++@androidx.camera.camera2.interop.ExperimentalCamera2Interop
++fun CaptureRequestOptions.Builder.setMtkPhotoHdr(
++    characteristics: CameraCharacteristics,
++    enabled: Boolean?,
++): CaptureRequestOptions.Builder {
++    val key = findKey(characteristics, "hdrMode") ?: return this
++    enabled?.let { putBooleanish(key, it) } ?: clearNumeric(key)
++    return this
++}
++
++@androidx.camera.camera2.interop.ExperimentalCamera2Interop
++fun CaptureRequestOptions.Builder.setMtkRemosaic(
++    characteristics: CameraCharacteristics,
++    enabled: Boolean?,
++): CaptureRequestOptions.Builder {
++    val key = findKey(characteristics, "remosaicenable") ?: return this
++    enabled?.let { putBooleanish(key, it) } ?: clearNumeric(key)
++    return this
++}
++
++@androidx.camera.camera2.interop.ExperimentalCamera2Interop
++fun CaptureRequestOptions.Builder.setMtkVideoEis(
++    characteristics: CameraCharacteristics,
++    enabled: Boolean?,
++): CaptureRequestOptions.Builder {
++    val key = findKey(characteristics, "eismode") ?: return this
++    enabled?.let { putBooleanish(key, it) } ?: clearNumeric(key)
++    return this
++}
++
++/** One user dial (plan §4) expanded to the full desired pipeline set. */
++data class MtkPipeline(
++    val turbo: MtkTurboLevel,
++    val hdr: Boolean,
++    val ais: Boolean,
++)
++
++@androidx.camera.camera2.interop.ExperimentalCamera2Interop
++fun CaptureRequestOptions.Builder.setMtkPipeline(
++    characteristics: CameraCharacteristics,
++    pipeline: MtkPipeline?,
++): CaptureRequestOptions.Builder {
++    pipeline ?: return this
++    when (pipeline.turbo) {
++        MtkTurboLevel.OFF -> {
++            findKey(characteristics, "mfbmode")
++                ?.let { clearNumeric(it) }
++            findKey(characteristics, "hdrMode")
++                ?.let { clearNumeric(it) }
++            findKey(characteristics, "aismode")
++                ?.let { clearNumeric(it) }
++        }
++
++        MtkTurboLevel.AUTO -> {
++            findKey(characteristics, "mfbmode")
++                ?.let { putNumeric(it, MtkMfbMode.AUTO.id) }
++            setMtkPhotoHdr(characteristics, pipeline.hdr)
++            setMtkAisStabilization(characteristics, pipeline.ais)
++        }
++
++        MtkTurboLevel.QUALITY -> {
++            findKey(characteristics, "mfbmode")
++                ?.let { putNumeric(it, MtkMfbMode.QUALITY.id) }
++            setMtkPhotoHdr(characteristics, pipeline.hdr)
++            setMtkAisStabilization(characteristics, pipeline.ais)
++        }
++    }
++    return this
++}
++
++@androidx.camera.camera2.interop.ExperimentalCamera2Interop
++fun CaptureRequestOptions.Builder.setComputationalStyle(
++    characteristics: CameraCharacteristics,
++    style: ComputationalStyle?,
++): CaptureRequestOptions.Builder {
++    style ?: return this
++    val tonemapModes = characteristics.get(CameraCharacteristics.TONEMAP_AVAILABLE_TONE_MAP_MODES) ?: intArrayOf()
++    val supportsCurve = tonemapModes.contains(CameraMetadata.TONEMAP_MODE_CONTRAST_CURVE)
++
++    when (style) {
++        ComputationalStyle.OFF -> {
++            setCaptureRequestOption(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_HIGH_QUALITY)
++        }
++        ComputationalStyle.PIXEL_HDR -> {
++            if (supportsCurve) {
++                // Pixel HDR+ contrast curve: deep shadows, punchy midtones, highlight protection
++                val curve = floatArrayOf(
++                    0.00f, 0.00f,
++                    0.05f, 0.03f,
++                    0.15f, 0.10f,
++                    0.30f, 0.25f,
++                    0.50f, 0.53f,
++                    0.70f, 0.77f,
++                    0.85f, 0.90f,
++                    1.00f, 1.00f
++                )
++                setCaptureRequestOption(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE)
++                setCaptureRequestOption(CaptureRequest.TONEMAP_CURVE, TonemapCurve(curve, curve, curve))
++            }
++            setCaptureRequestOption(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_HIGH_QUALITY)
++            setCaptureRequestOption(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY)
++        }
++        ComputationalStyle.HASSELBLAD_WARM -> {
++            if (supportsCurve) {
++                // OnePlus / Hasselblad Warm Natural: warm golden midtones with gentle highlight roll-off
++                val redCurve = floatArrayOf(
++                    0.00f, 0.00f,
++                    0.10f, 0.08f,
++                    0.30f, 0.32f,
++                    0.50f, 0.55f,
++                    0.75f, 0.78f,
++                    1.00f, 1.00f
++                )
++                val greenCurve = floatArrayOf(
++                    0.00f, 0.00f,
++                    0.10f, 0.07f,
++                    0.30f, 0.30f,
++                    0.50f, 0.51f,
++                    0.75f, 0.76f,
++                    1.00f, 1.00f
++                )
++                val blueCurve = floatArrayOf(
++                    0.00f, 0.00f,
++                    0.10f, 0.06f,
++                    0.30f, 0.27f,
++                    0.50f, 0.47f,
++                    0.75f, 0.74f,
++                    1.00f, 1.00f
++                )
++                setCaptureRequestOption(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE)
++                setCaptureRequestOption(CaptureRequest.TONEMAP_CURVE, TonemapCurve(redCurve, greenCurve, blueCurve))
++            }
++        }
++        ComputationalStyle.TRUELENS_NATURAL -> {
++            if (supportsCurve) {
++                // Nothing TrueLens / Apple iOS Natural: lifted shadow details, neutral skin tones
++                val curve = floatArrayOf(
++                    0.00f, 0.00f,
++                    0.08f, 0.11f,
++                    0.25f, 0.29f,
++                    0.50f, 0.52f,
++                    0.75f, 0.76f,
++                    1.00f, 1.00f
++                )
++                setCaptureRequestOption(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE)
++                setCaptureRequestOption(CaptureRequest.TONEMAP_CURVE, TonemapCurve(curve, curve, curve))
++            }
++        }
++    }
++    return this
++}
+diff --git a/app/src/main/java/org/lineageos/aperture/models/Camera.kt b/app/src/main/java/org/lineageos/aperture/models/Camera.kt
+index 0847e6f..f09c1dd 100644
+--- a/app/src/main/java/org/lineageos/aperture/models/Camera.kt
++++ b/app/src/main/java/org/lineageos/aperture/models/Camera.kt
+@@ -51,6 +51,12 @@ class Camera private constructor(
+      */
+     private val camera2CameraInfo: Camera2CameraInfo = Camera2CameraInfo.from(cameraInfo)
+ 
++    /**
++     * Extracted [CameraCharacteristics] for vendor-pipeline key queries.
++     */
++    val cameraCharacteristics: CameraCharacteristics =
++        Camera2CameraInfo.extractCameraCharacteristics(cameraInfo)
++
+     /**
+      * Camera2's camera ID.
+      */
+diff --git a/app/src/main/java/org/lineageos/aperture/models/MtkFeature.kt b/app/src/main/java/org/lineageos/aperture/models/MtkFeature.kt
+new file mode 100644
+index 0000000..5cfb9b7
+--- /dev/null
++++ b/app/src/main/java/org/lineageos/aperture/models/MtkFeature.kt
+@@ -0,0 +1,44 @@
++/*
++ * SPDX-FileCopyrightText: The LineageOS Project
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++package org.lineageos.aperture.models
++
++/**
++ * MTK MFB (multi-frame burst / MFnR) pipeline modes — values verified live on
++ * yogurt HAL: availablemfbmodes = [0, 1, 2, 255].
++ */
++enum class MtkMfbMode(val id: Int) {
++    OFF(0),
++    ON(1),
++    QUALITY(2),
++    AUTO(255),
++    ;
++
++    companion object {
++        fun from(id: Int?) = entries.firstOrNull { it.id == id }
++    }
++}
++
++/**
++ * One-dial "Turbo pipeline" level, mapped at write time into mfbmode +
++ * hdrMode + aismode (plan §4). AUTO = never write vendor keys (upstream parity).
++ */
++enum class MtkTurboLevel(val mfbId: Int) {
++    OFF(-1),
++    AUTO(255),
++    QUALITY(2),
++    ;
++}
++
++/**
++ * Computational photography color science & tonemapping presets
++ */
++enum class ComputationalStyle(val title: String) {
++    OFF("Stock"),
++    PIXEL_HDR("Pixel HDR+"),
++    HASSELBLAD_WARM("Hasselblad Warm"),
++    TRUELENS_NATURAL("TrueLens Natural"),
++    ;
++}
+-- 
+2.53.0
+

@@ -1,0 +1,514 @@
+diff --git a/bpf/headers/include/bpf/KernelUtils.h b/bpf/headers/include/bpf/KernelUtils.h
+index 1ee34f0..b3b222c 100644
+--- a/bpf/headers/include/bpf/KernelUtils.h
++++ b/bpf/headers/include/bpf/KernelUtils.h
+@@ -39,6 +39,11 @@ static inline unsigned uncachedKernelVersion() {
+     int kver_override_len = __system_property_get("ro.bpf.kver_override", kver_override);
+     if (sscanf(kver_override_len > 0 ? kver_override : buf.release, "%u.%u.%u",
+                &kver_major, &kver_minor, &kver_sub) < 2) abort();
++    // Kernel 4.14.141 sys_newuname spoofs "5.4.186" for netbpfload/bpfloader/netd;
++    // return true 4.14.141 when no explicit override property is set.
++    if (kver_override_len <= 0 && kver_major == 5 && kver_minor == 4 && kver_sub == 186) {
++        return KVER(4, 14, 141);
++    }
+     return KVER(kver_major, kver_minor, kver_sub);
+ }
+ 
+diff --git a/bpf/loader/NetBpfLoad.cpp b/bpf/loader/NetBpfLoad.cpp
+index d4853ba..7e2a1e4 100644
+--- a/bpf/loader/NetBpfLoad.cpp
++++ b/bpf/loader/NetBpfLoad.cpp
+@@ -1003,8 +1003,7 @@ static int validateProg(const borrowed_fd& fd, const char* const progPinLoc) {
+     if (!isUser) ALOGD("prog %s id %d len jit:%d xlat:%d", progPinLoc, progId, jitLen, xlatLen);
+ 
+     if (!jitLen && api_level_full >= NETBPFLOAD_25Q2_VER) {
+-        ALOGE("Kernel eBPF JIT failure for %s", progPinLoc);
+-        return -ENOTSUP;
++        ALOGW("Kernel eBPF JIT disabled or unavailable for %s", progPinLoc);
+     }
+     return 0;
+ }
+@@ -1103,6 +1102,11 @@ static int loadCodeSections(const ElfObject& elfObj, vector<codeSection>& cs,
+                           cs[i].prog_def->name());
+                     continue;
+                 }
++                if (!isAtLeastKernelVersion(4, 19)) {
++                    ALOGV("failed program %s on kernel < 4.19 - continuing...",
++                          cs[i].prog_def->name());
++                    continue;
++                }
+                 ALOGE("non-optional program %s failed to load.", cs[i].prog_def->name());
+             }
+         }
+@@ -1336,9 +1340,11 @@ static bool exists(const char* const path) {
+     abort();  // can only hit this if permissions (likely selinux) are screwed up
+ }
+ 
+-static bool loadObject(const char* const progPath, const bool useLibbpf = true) {
+-    if (useLibbpf ? loadProgByLibbpf(progPath) : loadProg(progPath)) {
+-        ALOGE("Failed to load object: %s, libbpf: %d", progPath, useLibbpf);
++static bool loadObject(const char* const progPath,
++                       const bool useLibbpf = isAtLeastKernelVersion(4, 19)) {
++    int rc = useLibbpf ? loadProgByLibbpf(progPath) : loadProg(progPath);
++    if (rc) {
++        ALOGE("Failed to load object: %s, libbpf: %d, rc: %d", progPath, useLibbpf, rc);
+         return false;
+     }
+     ALOGD("Loaded object: %s, libbpf: %d", progPath, useLibbpf);
+@@ -1562,15 +1568,13 @@ static int doLoad(char** argv, char * const envp[]) {
+     // V bumps the kernel requirement up to 4.19
+     // see also: //system/netd/tests/kernel_test.cpp TestKernel419
+     if (isAtLeastV && !isAtLeastKernelVersion(4, 19)) {
+-        ALOGE("Android V requires kernel 4.19.");
+-        return 5;
++        ALOGW("Android V officially requires kernel 4.19 (running in 4.14+ eBPF-backported mode).");
+     }
+ 
+     // 25Q2 bumps the kernel requirement up to 5.4
+     // see also: //system/netd/tests/kernel_test.cpp TestKernel54
+     if (isAtLeast25Q2 && !isAtLeastKernelVersion(5, 4)) {
+-        ALOGE("Android 25Q2 requires kernel 5.4.");
+-        return 6;
++        ALOGW("Android 25Q2 officially requires kernel 5.4 (running in 4.14+ eBPF-backported mode).");
+     }
+ 
+     // 25Q4 bumps the kernel requirement up to 5.10
+@@ -1581,8 +1585,7 @@ static int doLoad(char** argv, char * const envp[]) {
+ 
+     // 26Q4 bumps the kernel requirement up to 5.15
+     if (isAtLeast26Q4 && !isAtLeastKernelVersion(5, 15)) {
+-        ALOGE("Android 26Q4 requires kernel 5.15.");
+-        return 7;
++        ALOGW("Android 26Q4 officially requires kernel 5.15 (running in 4.14+ eBPF-backported mode).");
+     }
+ 
+     // Technically already required by U, but only enforce on V+
+@@ -1753,12 +1756,16 @@ static int doLoad(char** argv, char * const envp[]) {
+         //  kernel does not have CONFIG_BPF_JIT=y)
+         // BPF_JIT is required by R VINTF (which means 4.14/4.19/5.4 kernels),
+         // but 4.14/4.19 were released with P & Q, and only 5.4 is new in R+.
+-        if (!writeFile("/proc/sys/net/core/bpf_jit_enable", "1\n")) return 24;
++        if (!writeFile("/proc/sys/net/core/bpf_jit_enable", "1\n")) {
++            ALOGW("Failed to write /proc/sys/net/core/bpf_jit_enable (CONFIG_BPF_JIT not set?)");
++        }
+ 
+         // Enable JIT kallsyms export for privileged users only
+         // (Note: this (open) will fail with ENOENT 'No such file or directory' if
+         //  kernel does not have CONFIG_HAVE_EBPF_JIT=y)
+-        if (!writeFile("/proc/sys/net/core/bpf_jit_kallsyms", "1\n")) return 25;
++        if (!writeFile("/proc/sys/net/core/bpf_jit_kallsyms", "1\n")) {
++            ALOGW("Failed to write /proc/sys/net/core/bpf_jit_kallsyms (CONFIG_BPF_JIT not set?)");
++        }
+     }
+ 
+     // Create all the pin subdirectories
+@@ -1836,7 +1843,7 @@ static int doLoad(char** argv, char * const envp[]) {
+         ALOGE("If this triggers randomly, you might be hitting some memory allocation "
+               "problems or startup script race.");
+         ALOGE("--- DO NOT EXPECT SYSTEM TO BOOT SUCCESSFULLY ---");
+-        sleep(20);
++        sleep(1);
+         return 38;
+     }
+ 
+diff --git a/bpf/netd/BpfHandler.cpp b/bpf/netd/BpfHandler.cpp
+index 9b57548..65f52bc 100644
+--- a/bpf/netd/BpfHandler.cpp
++++ b/bpf/netd/BpfHandler.cpp
+@@ -18,9 +18,10 @@
+ 
+ #include "BpfHandler.h"
+ 
+-#include <linux/bpf.h>
+ #include <inttypes.h>
++#include <linux/bpf.h>
+ 
++#include <android-base/logging.h>
+ #include <android-base/result.h>
+ #include <android-base/unique_fd.h>
+ #include <bpf/WaitForProgsLoaded.h>
+@@ -35,6 +36,8 @@ namespace android {
+ namespace net {
+ 
+ using base::Error;
++using base::ERROR;
++using base::INFO;
+ using base::Result;
+ using base::unique_fd;
+ using base::WaitForProperty;
+@@ -131,12 +134,12 @@ static Result<void> initPrograms(const char* cg2_path) {
+ 
+     // V bumps the kernel requirement up to 4.19
+     if (isAtLeastV && !isAtLeastKernelVersion(4, 19)) {
+-        return Error() << "V+ platform with kernel version < 4.19.0 is unsupported";
++        ALOGW("V+ platform with kernel version < 4.19.0 (running in 4.14+ eBPF-backported mode)");
+     }
+ 
+     // 25Q2 bumps the kernel requirement up to 5.4
+     if (isAtLeast25Q2 && !isAtLeastKernelVersion(5, 4)) {
+-        return Error() << "25Q2+ platform with kernel version < 5.4.0 is unsupported";
++        ALOGW("25Q2+ platform with kernel version < 5.4.0 (running in 4.14+ eBPF-backported mode)");
+     }
+ 
+     unique_fd cg_fd(open(cg2_path, O_DIRECTORY | O_RDONLY | O_CLOEXEC));
+@@ -328,8 +331,9 @@ Result<void> BpfHandler::init(const char* cg2_path) {
+         // 25Q2 netd.rc includes "rlimit memlock 1073741824 1073741824"
+         // so this should be a no-op, and thus just succeed.
+         // make sure it isn't lowered in platform netd.rc...
+-        if (setrlimit(RLIMIT_MEMLOCK, &limit))
++        if (setrlimit(RLIMIT_MEMLOCK, &limit)) {
+             return Error(errno) << "Failed to set 1GiB RLIMIT_MEMLOCK";
++        }
+ 
+         // Make sure netd can create & write maps.  sepolicy is V+, but enough to enforce on 25Q2+
+         int key = 1;
+@@ -369,14 +373,16 @@ Result<void> BpfHandler::init(const char* cg2_path) {
+         struct sockaddr_in6 addr6 = {
+             .sin6_family = AF_INET6,
+         };
+-        if (bind(server.get(), (struct sockaddr*)&addr6, sizeof(addr6)))
++        if (bind(server.get(), (struct sockaddr*)&addr6, sizeof(addr6))) {
+             return Error(errno) << "bind";
++        }
+ 
+         if (listen(server.get(), 1)) return Error(errno) << "listen";
+ 
+         socklen_t addr6_len = sizeof(addr6);
+-        if (getsockname(server.get(), (struct sockaddr*)&addr6, &addr6_len))
++        if (getsockname(server.get(), (struct sockaddr*)&addr6, &addr6_len)) {
+             return Error(errno) << "getsockname";
++        }
+         if (addr6_len != sizeof(addr6)) return Error() << "addr6_len";
+ 
+         unique_fd client(socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0));
+@@ -442,8 +448,9 @@ Result<void> BpfHandler::init(const char* cg2_path) {
+             .sin_family = AF_INET,
+             .sin_port = addr6.sin6_port,
+         };
+-        if (connect(client.get(), (struct sockaddr*)&addr4, sizeof(addr4)))
++        if (connect(client.get(), (struct sockaddr*)&addr4, sizeof(addr4))) {
+             return Error(errno) << "connect";  // fails with ENETUNREACH if 'lo' is down
++        }
+ 
+         unique_fd peer(accept4(server.get(), NULL, NULL, SOCK_CLOEXEC));
+         if (!peer.ok()) return Error(errno) << "accept";
+diff --git a/bpf/progs/clatd.c b/bpf/progs/clatd.c
+index 803fb3d..19801eb 100644
+--- a/bpf/progs/clatd.c
++++ b/bpf/progs/clatd.c
+@@ -247,22 +247,22 @@ function int nat64(struct __sk_buff* skb,
+     return TC_ACT_PIPE;
+ }
+ 
+-DEFINE_BPF_PROG_KVER(schedcls, ingress6_clat_ether, AID_SYSTEM, 4_14)
++DEFINE_OPTIONAL_BPF_PROG_KVER_RANGE(schedcls, ingress6_clat_ether, AID_SYSTEM, 4_14, INF)
+ (struct __sk_buff* skb) {
+     return nat64(skb, ETHER, KVER_4_14);
+ }
+ 
+-DEFINE_BPF_PROG_KVER_RANGE(schedcls, ingress6_clat_ether, AID_SYSTEM, 4_9, 4_14)
++DEFINE_BPF_PROG_KVER_RANGE(schedcls, ingress6_clat_ether, AID_SYSTEM, 4_9, INF)
+ (struct __sk_buff* skb) {
+     return nat64(skb, ETHER, KVER_4_9);
+ }
+ 
+-DEFINE_BPF_PROG_KVER(schedcls, ingress6_clat_rawip, AID_SYSTEM, 4_14)
++DEFINE_OPTIONAL_BPF_PROG_KVER_RANGE(schedcls, ingress6_clat_rawip, AID_SYSTEM, 4_14, INF)
+ (struct __sk_buff* skb) {
+     return nat64(skb, RAWIP, KVER_4_14);
+ }
+ 
+-DEFINE_BPF_PROG_KVER_RANGE(schedcls, ingress6_clat_rawip, AID_SYSTEM, 4_9, 4_14)
++DEFINE_BPF_PROG_KVER_RANGE(schedcls, ingress6_clat_rawip, AID_SYSTEM, 4_9, INF)
+ (struct __sk_buff* skb) {
+     return nat64(skb, RAWIP, KVER_4_9);
+ }
+diff --git a/bpf/progs/netd.c b/bpf/progs/netd.c
+index e4cd7c9..bc0f980 100644
+--- a/bpf/progs/netd.c
++++ b/bpf/progs/netd.c
+@@ -1025,8 +1025,8 @@ DEFINE_NETD_BPF_PROG_RANGES(ingress, stats, 4_19, 5_4, T, 25Q2)
+ return bpf_traffic_account(skb, INGRESS, KVER_4_19, API(T));
+ }
+ 
+-// Android T 4.9 & T/U 4.14
+-DEFINE_NETD_BPF_PROG_RANGES(ingress, stats, 4_9, 4_19, T, V)
++// Android T 4.9 & T/U/17+ 4.14
++DEFINE_NETD_BPF_PROG_RANGES(ingress, stats, 4_9, 4_19, T, MAXAPI)
+ (struct __sk_buff* skb) {
+     return bpf_traffic_account(skb, INGRESS, KVER_4_9, API(T));
+ }
+@@ -1081,8 +1081,8 @@ DEFINE_NETD_BPF_PROG_RANGES(egress, stats, 4_19, 5_4, T, 25Q2)
+ return bpf_traffic_account(skb, EGRESS, KVER_4_19, API(T));
+ }
+ 
+-// Android T 4.9 & T/U 4.14
+-DEFINE_NETD_BPF_PROG_RANGES(egress, stats, 4_9, 4_19, T, V)
++// Android T 4.9 & T/U/17+ 4.14
++DEFINE_NETD_BPF_PROG_RANGES(egress, stats, 4_9, 4_19, T, MAXAPI)
+ (struct __sk_buff* skb) {
+     return bpf_traffic_account(skb, EGRESS, KVER_4_9, API(T));
+ }
+diff --git a/bpf/progs/offload.c b/bpf/progs/offload.c
+index 2afbd2b..741e0f6 100644
+--- a/bpf/progs/offload.c
++++ b/bpf/progs/offload.c
+@@ -302,24 +302,25 @@ DEFINE_BPF_PROG_KVER(schedcls, tether_upstream6_rawip, AID_NETWORK_STACK, 5_4)
+     return do_forward6(skb, RAWIP, UPSTREAM, KVER_5_4);
+ }
+ 
+-// and for 4.14/4.19 kernels
+-DEFINE_BPF_PROG_KVER_RANGE(schedcls, tether_downstream6_rawip, AID_NETWORK_STACK, 4_14, 5_4)
++// and for 4.14/4.19 (R+) kernels -- optional so 4.14/4.19 (P/Q) kernels without
++// BPF_FUNC_skb_change_head enabled for TC programs fall back to the stubs below.
++DEFINE_OPTIONAL_BPF_PROG_KVER_RANGE(schedcls, tether_downstream6_rawip, AID_NETWORK_STACK, 4_14, 5_4)
+ (struct __sk_buff* skb) {
+     return do_forward6(skb, RAWIP, DOWNSTREAM, KVER_4_14);
+ }
+ 
+-DEFINE_BPF_PROG_KVER_RANGE(schedcls, tether_upstream6_rawip, AID_NETWORK_STACK, 4_14, 5_4)
++DEFINE_OPTIONAL_BPF_PROG_KVER_RANGE(schedcls, tether_upstream6_rawip, AID_NETWORK_STACK, 4_14, 5_4)
+ (struct __sk_buff* skb) {
+     return do_forward6(skb, RAWIP, UPSTREAM, KVER_4_14);
+ }
+ 
+-// and define no-op stubs for pre-4.14 kernels.
+-DEFINE_BPF_PROG_KVER_RANGE(schedcls, tether_downstream6_rawip, AID_NETWORK_STACK, 4_9, 4_14)
++// and define no-op stubs for pre-5.4 (4.9-P/Q, 4.14-P/Q, 4.19-Q) kernels.
++DEFINE_BPF_PROG_KVER_RANGE(schedcls, tether_downstream6_rawip, AID_NETWORK_STACK, 4_9, 5_4)
+ (__unused struct __sk_buff* skb) {
+     return TC_ACT_PIPE;
+ }
+ 
+-DEFINE_BPF_PROG_KVER_RANGE(schedcls, tether_upstream6_rawip, AID_NETWORK_STACK, 4_9, 4_14)
++DEFINE_BPF_PROG_KVER_RANGE(schedcls, tether_upstream6_rawip, AID_NETWORK_STACK, 4_9, 5_4)
+ (__unused struct __sk_buff* skb) {
+     return TC_ACT_PIPE;
+ }
+@@ -774,24 +775,24 @@ DEFINE_BPF_PROG_KVER_RANGE(schedcls, tether_upstream4_ether, AID_NETWORK_STACK,
+     return do_forward4(skb, ETHER, UPSTREAM, NO_UPDATETIME, KVER_4_14);
+ }
+ 
+-// Placeholder (no-op) implementations for 4.9 kernels
++// Placeholder (no-op) implementations for pre-5.4 kernels fallback
+ 
+-DEFINE_BPF_PROG_KVER_RANGE(schedcls, tether_downstream4_rawip, AID_NETWORK_STACK, 4_9, 4_14)
++DEFINE_BPF_PROG_KVER_RANGE(schedcls, tether_downstream4_rawip, AID_NETWORK_STACK, 4_9, 5_4)
+ (__unused struct __sk_buff* skb) {
+     return TC_ACT_PIPE;
+ }
+ 
+-DEFINE_BPF_PROG_KVER_RANGE(schedcls, tether_upstream4_rawip, AID_NETWORK_STACK, 4_9, 4_14)
++DEFINE_BPF_PROG_KVER_RANGE(schedcls, tether_upstream4_rawip, AID_NETWORK_STACK, 4_9, 5_4)
+ (__unused struct __sk_buff* skb) {
+     return TC_ACT_PIPE;
+ }
+ 
+-DEFINE_BPF_PROG_KVER_RANGE(schedcls, tether_downstream4_ether, AID_NETWORK_STACK, 4_9, 4_14)
++DEFINE_BPF_PROG_KVER_RANGE(schedcls, tether_downstream4_ether, AID_NETWORK_STACK, 4_9, 5_4)
+ (__unused struct __sk_buff* skb) {
+     return TC_ACT_PIPE;
+ }
+ 
+-DEFINE_BPF_PROG_KVER_RANGE(schedcls, tether_upstream4_ether, AID_NETWORK_STACK, 4_9, 4_14)
++DEFINE_BPF_PROG_KVER_RANGE(schedcls, tether_upstream4_ether, AID_NETWORK_STACK, 4_9, 5_4)
+ (__unused struct __sk_buff* skb) {
+     return TC_ACT_PIPE;
+ }
+diff --git a/service/jni/com_android_server_connectivity_ClatCoordinator.cpp b/service/jni/com_android_server_connectivity_ClatCoordinator.cpp
+index 70991eb..a892f75 100644
+--- a/service/jni/com_android_server_connectivity_ClatCoordinator.cpp
++++ b/service/jni/com_android_server_connectivity_ClatCoordinator.cpp
+@@ -36,6 +36,7 @@
+ #include <android-modules-utils/sdk_level.h>
+ #include <bpf/BpfMap.h>
+ #include <bpf/BpfUtils.h>
++#include <bpf/KernelUtils.h>
+ #include <netjniutils/netjniutils.h>
+ #include <private/android_filesystem_config.h>
+ 
+@@ -71,7 +72,11 @@ static void verifyPerms(const char * const path,
+     char b[255] = {};
+     int v = lgetxattr(path, "security.selinux", &b, sizeof(b));
+     if (v < 0) ALOGF("lgetxattr '%s' errno=%d", path, errno);
+-    if (strncmp(ctxt, b, sizeof(b))) ALOGF("context of '%s' is '%s' != '%s'", path, b, ctxt);
++    // Kernel < 4.19 bpffs does not support subdirectory genfscon labels (everything is fs_bpf)
++    if (strncmp(ctxt, b, sizeof(b)) &&
++        (strncmp(path, "/sys/fs/bpf/", 12) || strncmp("u:object_r:fs_bpf:s0", b, sizeof(b)))) {
++        ALOGF("context of '%s' is '%s' != '%s'", path, b, ctxt);
++    }
+ 
+     int fd = -1;
+ 
+@@ -101,6 +106,9 @@ static void verifyClatPerms() {
+     // We might run as part of tests instead of as part of system server
+     if (getuid() != AID_SYSTEM) return;
+ 
++    // Kernel < 4.19 bpffs lacks per-directory genfscon and clat eBPF support
++    if (!bpf::isAtLeastKernelVersion(4, 19)) return;
++
+     // First verify the clatd directory and binary,
+     // since this is built into the apex file system image,
+     // failures here are 99% likely to be build problems.
+diff --git a/service/native/libs/libeventpolling/LocalNetEventHandler.cpp b/service/native/libs/libeventpolling/LocalNetEventHandler.cpp
+index 59c2844..30ca09b 100644
+--- a/service/native/libs/libeventpolling/LocalNetEventHandler.cpp
++++ b/service/native/libs/libeventpolling/LocalNetEventHandler.cpp
+@@ -36,18 +36,26 @@ using bpf::RingbufEventPoller;
+ LocalNetEventHandler::LocalNetEventRingbuf *LocalNetEventHandler::GetRingbuf() {
+     static LocalNetEventRingbuf *const sRingbuf =
+         []() -> LocalNetEventRingbuf * {
+-        auto rb = std::make_unique<LocalNetEventRingbuf>(
+-            LOCAL_NET_NOTE_OP_RINGBUF_PATH);
+-        return rb.release();
++        auto rb = LocalNetEventRingbuf::Create(LOCAL_NET_NOTE_OP_RINGBUF_PATH);
++        if (!rb.ok()) {
++            ALOGW("LocalNetEventHandler ringbuf unavailable: %s",
++                  rb.error().message().c_str());
++            return nullptr;
++        }
++        return rb->release();
+     }();
+     return sRingbuf;
+ }
+ 
+ // static
+ std::vector<uint32_t> LocalNetEventHandler::ConsumeAll() {
++    LocalNetEventRingbuf *rb = GetRingbuf();
++    if (!rb) {
++        return {};
++    }
+     std::vector<uint32_t> uids_pids;
+     base::Result<int> ret =
+-        GetRingbuf()->ConsumeAll([&](const LocalNetNoteOp &event) {
++        rb->ConsumeAll([&](const LocalNetNoteOp &event) {
+             uids_pids.push_back(event.uid);
+             uids_pids.push_back(event.pid);
+         });
+diff --git a/service/native/libs/libeventpolling/LoopbackEventHandler.cpp b/service/native/libs/libeventpolling/LoopbackEventHandler.cpp
+index 942bbf6..990e8a3 100644
+--- a/service/native/libs/libeventpolling/LoopbackEventHandler.cpp
++++ b/service/native/libs/libeventpolling/LoopbackEventHandler.cpp
+@@ -53,8 +53,13 @@ bpf::RingbufEventPoller<LoopbackAccessEvent> *
+ LoopbackEventHandler::GetPoller() {
+     static bpf::RingbufEventPoller<LoopbackAccessEvent> *const sPoller =
+         []() -> bpf::RingbufEventPoller<LoopbackAccessEvent> * {
+-        auto rb = std::make_unique<BpfRingbuf<LoopbackAccessEvent>>(
++        auto rb = BpfRingbuf<LoopbackAccessEvent>::Create(
+             LOOPBACK_ACCESS_RINGBUF_NETD_PATH);
++        if (!rb.ok()) {
++            ALOGW("LoopbackEventHandler ringbuf unavailable: %s",
++                  rb.error().message().c_str());
++            return nullptr;
++        }
+ 
+         auto callback = [](const std::vector<LoopbackAccessEvent> &events) {
+             for (const LoopbackAccessEvent &event : events) {
+@@ -66,7 +71,7 @@ LoopbackEventHandler::GetPoller() {
+         };
+ 
+         auto result = RingbufEventPoller<LoopbackAccessEvent>::Create(
+-            std::move(callback), std::move(rb));
++            std::move(callback), std::move(*rb));
+ 
+         if (!result.ok()) {
+             ALOGE("Failed to create RingbufEventPoller: %s",
+diff --git a/service/native/libs/libeventpolling/include/libeventpolling/LocalNetEventHandler.h b/service/native/libs/libeventpolling/include/libeventpolling/LocalNetEventHandler.h
+index ce46620..9eb80c9 100644
+--- a/service/native/libs/libeventpolling/include/libeventpolling/LocalNetEventHandler.h
++++ b/service/native/libs/libeventpolling/include/libeventpolling/LocalNetEventHandler.h
+@@ -16,8 +16,10 @@
+ 
+ #pragma once
+ 
++#include <memory>
+ #include <vector>
+ 
++#include <android-base/result.h>
+ #include <android-base/unique_fd.h>
+ #include <bpf/RingbufEventPoller.h>
+ 
+@@ -36,7 +38,9 @@ class LocalNetEventHandler {
+     // Returns a duplicate of the ring buffer file descriptor. This is needed so
+     // we can pass the file descriptor via jni for use in polling in java.
+     static android::base::unique_fd GetNewRingbufFd() {
+-        return GetRingbuf()->GetDuplicateFd();
++        auto *rb = GetRingbuf();
++        if (!rb) return android::base::unique_fd();
++        return rb->GetDuplicateFd();
+     }
+ 
+     // Consumes all available events in the ring buffer. Returns a list of
+@@ -48,13 +52,23 @@ class LocalNetEventHandler {
+   private:
+     class LocalNetEventRingbuf : public bpf::BpfRingbuf<LocalNetNoteOp> {
+       public:
+-        LocalNetEventRingbuf(const char *path)
+-            : BpfRingbuf<LocalNetNoteOp>(path) {}
++        static android::base::Result<std::unique_ptr<LocalNetEventRingbuf>>
++        Create(const char *path) {
++            auto rb =
++                std::unique_ptr<LocalNetEventRingbuf>(new LocalNetEventRingbuf());
++            if (auto status = rb->Init(path); !status.ok()) {
++                return status.error();
++            }
++            return rb;
++        }
+ 
+         android::base::unique_fd GetDuplicateFd() {
+             return android::base::unique_fd(
+                 fcntl(mRingFd.get(), F_DUPFD_CLOEXEC, 0));
+         }
++
++      private:
++        LocalNetEventRingbuf() : BpfRingbuf<LocalNetNoteOp>() {}
+     };
+ 
+     static LocalNetEventRingbuf *GetRingbuf();
+diff --git a/service/src/com/android/server/connectivity/LocalNetEventListener.java b/service/src/com/android/server/connectivity/LocalNetEventListener.java
+index e8d495c..f3bc6cc 100644
+--- a/service/src/com/android/server/connectivity/LocalNetEventListener.java
++++ b/service/src/com/android/server/connectivity/LocalNetEventListener.java
+@@ -98,6 +98,11 @@ public class LocalNetEventListener {
+         if (mStarted) {
+             return;
+         }
++        if (mRingbufFd == null) {
++            Log.w(TAG, "LocalNetEventListener disabled: ringbuf fd unavailable");
++            mStarted = true;
++            return;
++        }
+         if (mMetricsEnabled || mNoteOpsEnabled) {
+             mLooper.getQueue().addOnFileDescriptorEventListener(mRingbufFd,
+                     EVENT_INPUT | EVENT_ERROR, this::consumeEvents);
+diff --git a/staticlibs/device/com/android/net/module/util/SingleWriterBpfMap.java b/staticlibs/device/com/android/net/module/util/SingleWriterBpfMap.java
+index a638cc4..f62696f 100644
+--- a/staticlibs/device/com/android/net/module/util/SingleWriterBpfMap.java
++++ b/staticlibs/device/com/android/net/module/util/SingleWriterBpfMap.java
+@@ -144,4 +144,12 @@ public class SingleWriterBpfMap<K extends Struct, V extends Struct> extends BpfM
+     public synchronized V getValue(@NonNull K key) throws ErrnoException {
+         return mCache.get(key);
+     }
++
++    @Override
++    public synchronized void clear() throws ErrnoException {
++        for (K key : new java.util.ArrayList<>(mCache.keySet())) {
++            deleteEntry(key);
++        }
++        super.clear();
++    }
+ }
+diff --git a/staticlibs/native/bpfmapjni/com_android_net_module_util_Bpf.cpp b/staticlibs/native/bpfmapjni/com_android_net_module_util_Bpf.cpp
+index 055caa2..5761a25 100644
+--- a/staticlibs/native/bpfmapjni/com_android_net_module_util_Bpf.cpp
++++ b/staticlibs/native/bpfmapjni/com_android_net_module_util_Bpf.cpp
+@@ -90,7 +90,8 @@ static void com_android_net_module_util_BpfMap_nativeWriteToMapEntry(JNIEnv *env
+ static jboolean throwIfNotEnoent(JNIEnv *env, const char* functionName, int ret, int err) {
+     if (ret == 0) return true;
+ 
+-    if (err != ENOENT) jniThrowErrnoException(env, functionName, err);
++    // Kernel < 4.16 BPF_MAP_TYPE_LPM_TRIE returns ENOTSUPP (524) for BPF_MAP_GET_NEXT_KEY
++    if (err != ENOENT && err != 524) jniThrowErrnoException(env, functionName, err);
+     return false;
+ }
+ 

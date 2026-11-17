@@ -1,0 +1,48 @@
+=================================================================
+  DERPFEST 17 (ANDROID 17 / API 37) BUILD COMPLETION REPORT     
+  Device: Micromax IN Note 1 (yogurt / E7746 / MT6768)          
+  Date: 2026-11-10 16:10:38 +0545                         
+=================================================================
+
+Generated Artifacts:
+-rw-rw-r-- 2 bishal-regmi bishal-regmi 1.7G Nov 10 16:09 /mnt/rombuild/out/target/product/yogurt/DerpFest-v17-20261110-yogurt-Community-Stable.zip
+-rw-rw-r-- 1 bishal-regmi bishal-regmi  116 Nov 10 16:10 /mnt/rombuild/out/target/product/yogurt/DerpFest-v17-20261110-yogurt-Community-Stable.zip.sha256sum
+-rw-rw-r-- 1 bishal-regmi bishal-regmi  32M Nov 10 14:03 /mnt/rombuild/out/target/product/yogurt/boot.img
+-rw-rw-r-- 2 bishal-regmi bishal-regmi 1.7G Nov 10 16:09 /mnt/rombuild/out/target/product/yogurt/derp_yogurt-ota.zip
+-rw-rw-r-- 1 bishal-regmi bishal-regmi  32M Nov 10 14:04 /mnt/rombuild/out/target/product/yogurt/recovery.img
+-rw-r--r-- 1 bishal-regmi bishal-regmi 3.8G Nov 10 15:44 /mnt/rombuild/out/target/product/yogurt/super.img
+-rw-rw-r-- 1 bishal-regmi bishal-regmi  64K Nov 10 14:36 /mnt/rombuild/out/target/product/yogurt/vbmeta.img
+-rw-rw-r-- 1 bishal-regmi bishal-regmi  426 Nov 10 16:10 /mnt/rombuild/out/target/product/yogurt/yogurt.json
+
+Super Image Size Check:
+  Measured: 4013617804 bytes
+  Max Limit: 4290772992 bytes (4,290,772,992 B)
+  Safety Margin: 277155188 bytes under limit
+  Status: PASSED (Under physical flash boundary)
+
+SHA-256 Checksums:
+51a1bdcdec0812748e03d2195aa736c84b885a726621d11bd2438c0096d2d2b0  /mnt/rombuild/out/target/product/yogurt/DerpFest-v17-20261110-yogurt-Community-Stable.zip
+51a1bdcdec0812748e03d2195aa736c84b885a726621d11bd2438c0096d2d2b0  /mnt/rombuild/out/target/product/yogurt/derp_yogurt-ota.zip
+242b1abf80350bed3e1c40c93f17e511e3a4c26d63fb9741e541d3a18ec9d40e  /mnt/rombuild/out/target/product/yogurt/boot.img
+3e4850c8a97ad69a5117f24bdf0af8e35bb607d0ca4dfa6a16cad94cfdf08d2f  /mnt/rombuild/out/target/product/yogurt/recovery.img
+e9bd6943bd8c0ee232d6eaf60d2bda408c23bd11c612b5fe2315ccadb4eeef7e  /mnt/rombuild/out/target/product/yogurt/vbmeta.img
+de74bb1887d6370244c4b253b170eff5c5275906eeec5e1873352b73576d5e9e  /mnt/rombuild/out/target/product/yogurt/super.img
+
+OTA JSON Metadata (yogurt.json):
+{
+  "response": [
+    {
+      "datetime": 1794293021,
+      "filename": "DerpFest-v17-20261110-yogurt-Community-Stable.zip",
+      "id": "51a1bdcdec0812748e03d2195aa736c84b885a726621d11bd2438c0096d2d2b0",
+      "romtype": "Community",
+      "size": 1820938912,
+      "url": "https://sourceforge.net/projects/derpfest/files/yogurt/DerpFest-v17-20261110-yogurt-Community-Stable.zip/download",
+      "version": "v17"
+    }
+  ]
+}
+
+=================================================================
+  STATUS: BUILD 100% COMPLETE & VERIFIED ON DISK.               
+=================================================================

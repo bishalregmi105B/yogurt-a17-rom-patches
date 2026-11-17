@@ -1,0 +1,4 @@
+ M app/src/main/java/org/lineageos/aperture/CameraActivity.kt
+ M app/src/main/java/org/lineageos/aperture/models/Camera.kt
+?? app/src/main/java/org/lineageos/aperture/ext/MtkRequestOptions.kt
+?? app/src/main/java/org/lineageos/aperture/models/MtkFeature.kt

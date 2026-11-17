@@ -1,0 +1,284 @@
+From 64e5957b9850b87660f7c0e25841ce41e86fa83a Mon Sep 17 00:00:00 2001
+From: Bishal Regmi <89974678+bishalregmi105B@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 22:06:22 +0545
+Subject: [PATCH] yogurt: GameSpace power hints, 60% zstd zRAM, Android 17 LMKD
+ PSI, GCam XML profile & camera permissions
+
+---
+ configs/camera/yogurt_s5kgm1_pro.xml          | 38 +++++++++++++++++++
+ .../privapp-permissions-camera.xml            | 23 +++++++++++
+ configs/power/powerscntbl.xml                 | 19 ++++++++++
+ device.mk                                     |  2 +
+ rootdir/etc/fstab.mt6768                      | 16 ++++----
+ rootdir/etc/init.ago.rc                       |  2 +-
+ rootdir/etc/init.mt6768.rc                    | 10 ++++-
+ system.prop                                   |  4 +-
+ vendor.prop                                   | 15 ++++----
+ 9 files changed, 108 insertions(+), 21 deletions(-)
+ create mode 100644 configs/camera/yogurt_s5kgm1_pro.xml
+ create mode 100644 configs/permissions/privapp-permissions-camera.xml
+
+diff --git a/configs/camera/yogurt_s5kgm1_pro.xml b/configs/camera/yogurt_s5kgm1_pro.xml
+new file mode 100644
+index 0000000..0441fe5
+--- /dev/null
++++ b/configs/camera/yogurt_s5kgm1_pro.xml
+@@ -0,0 +1,38 @@
++<?xml version="1.0" encoding="utf-8" standalone="yes"?>
++<!--
++    Google Camera (BSG / LMC / Shamim) XML Configuration for Micromax IN Note 1 (yogurt)
++    SoC: MediaTek Helio G85 (MT6768)
++    Primary Sensor: 48 MP Samsung ISOCELL GM1 (S5KGM1ST / Tetracell) -> 12 MP default / 48 MP remosaic
++    Front Sensor: 16 MP Samsung S5K3P9SP
++    Ultrawide Sensor: 5 MP GalaxyCore GC5035
++    Macro Sensor: 2 MP GalaxyCore GC02M1
++-->
++<gcam_config>
++    <!-- Hardware Stream & Color Correction -->
++    <setting key="pref_c2api_stream_key" value="RAW10" />
++    <setting key="pref_black_level_key" value="64.0" />
++    <setting key="pref_black_level_front_key" value="64.0" />
++    <setting key="pref_color_model_key" value="s5kgm1" />
++    <setting key="pref_awb_model_key" value="pixel_3" />
++
++    <!-- HDR+ Frame Counts (Tuned for Helio G85 8-core CPU without capture lag) -->
++    <setting key="pref_hdr_frames_key" value="9" />
++    <setting key="pref_hdr_plus_enhanced_key" value="1" />
++    <setting key="pref_sabre_key" value="1" />
++    <setting key="pref_noise_reduction_key" value="2" />
++    <setting key="pref_sharpness_key" value="1.25" />
++    <setting key="pref_saturation_key" value="1.1" />
++
++    <!-- Aux Lens Mapping for Micromax IN Note 1 -->
++    <setting key="pref_aux_main_id" value="0" />
++    <setting key="pref_aux_front_id" value="1" />
++    <setting key="pref_aux_wide_id" value="3" />
++    <setting key="pref_aux_macro_id" value="4" />
++    <setting key="pref_aux_enable_key" value="1" />
++
++    <!-- Stabilization & Focus -->
++    <setting key="pref_optical_stabilization_key" value="0" />
++    <setting key="pref_electronic_stabilization_key" value="1" />
++    <setting key="pref_focus_tracking_key" value="1" />
++    <setting key="pref_motion_photo_key" value="0" />
++</gcam_config>
+diff --git a/configs/permissions/privapp-permissions-camera.xml b/configs/permissions/privapp-permissions-camera.xml
+new file mode 100644
+index 0000000..2e3064b
+--- /dev/null
++++ b/configs/permissions/privapp-permissions-camera.xml
+@@ -0,0 +1,23 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!--
++    Privileged app permissions for Camera packages (Aperture, Google Camera)
++-->
++<permissions>
++    <privapp-permissions package="org.lineageos.aperture">
++        <permission name="android.permission.CAMERA" />
++        <permission name="android.permission.RECORD_AUDIO" />
++        <permission name="android.permission.ACCESS_FINE_LOCATION" />
++        <permission name="android.permission.WRITE_SECURE_SETTINGS" />
++        <permission name="android.permission.SYSTEM_CAMERA" />
++    </privapp-permissions>
++    <privapp-permissions package="com.android.camera">
++        <permission name="android.permission.CAMERA" />
++        <permission name="android.permission.RECORD_AUDIO" />
++        <permission name="android.permission.SYSTEM_CAMERA" />
++    </privapp-permissions>
++    <privapp-permissions package="com.google.android.GoogleCamera">
++        <permission name="android.permission.CAMERA" />
++        <permission name="android.permission.RECORD_AUDIO" />
++        <permission name="android.permission.SYSTEM_CAMERA" />
++    </privapp-permissions>
++</permissions>
+diff --git a/configs/power/powerscntbl.xml b/configs/power/powerscntbl.xml
+index d1d1554..3096a32 100644
+--- a/configs/power/powerscntbl.xml
++++ b/configs/power/powerscntbl.xml
+@@ -18,4 +18,23 @@
+         <data cmd="PERF_RES_SCHED_UCLAMP_MIN_TA" param1="100"></data>
+         <data cmd="PERF_RES_SCHED_CACHE_AUDIT" param1="1"></data>
+     </scenario>
++    <!-- DerpFest GameSpace & Android Game Mode Performance -->
++    <scenario powerhint="FIXED_PERFORMANCE">
++        <data cmd="PERF_RES_CPUFREQ_MIN_CLUSTER_0" param1="1500000"></data>
++        <data cmd="PERF_RES_CPUFREQ_MIN_CLUSTER_1" param1="1800000"></data>
++        <data cmd="PERF_RES_CPUFREQ_MAX_CLUSTER_0" param1="3000000"></data>
++        <data cmd="PERF_RES_CPUFREQ_MAX_CLUSTER_1" param1="3000000"></data>
++        <data cmd="PERF_RES_SCHED_UCLAMP_MIN_TA" param1="80"></data>
++        <data cmd="PERF_RES_SCHED_BOOST_VALUE_ROOT" param1="30"></data>
++        <data cmd="PERF_RES_DRAM_OPP_MIN" param1="0"></data>
++        <data cmd="PERF_RES_GPU_GED_BENCHMARK_ON" param1="1"></data>
++        <data cmd="PERF_RES_GPU_GED_GX_BOOST" param1="1"></data>
++        <data cmd="PERF_RES_FPS_FBT_KMIN" param1="10"></data>
++    </scenario>
++    <!-- SurfaceFlinger Heavy Frame Render Boost -->
++    <scenario powerhint="EXPENSIVE_RENDERING">
++        <data cmd="PERF_RES_CPUFREQ_MIN_CLUSTER_1" param1="1400000"></data>
++        <data cmd="PERF_RES_SCHED_UCLAMP_MIN_TA" param1="60"></data>
++        <data cmd="PERF_RES_GPU_GED_GX_BOOST" param1="1"></data>
++    </scenario>
+ </SCNTABLE>
+diff --git a/device.mk b/device.mk
+index 1102d82..eadd7c3 100644
+--- a/device.mk
++++ b/device.mk
+@@ -257,6 +257,7 @@ PRODUCT_COPY_FILES += \
+     $(LOCAL_PATH)/configs/media/media_codecs_mediatek_video.xml:$(TARGET_COPY_OUT_VENDOR)/etc/media_codecs_mediatek_video.xml \
+     $(LOCAL_PATH)/configs/media/media_codecs_performance.xml:$(TARGET_COPY_OUT_VENDOR)/etc/media_codecs_performance.xml \
+     $(LOCAL_PATH)/configs/media/media_profiles_V1_0.xml:$(TARGET_COPY_OUT_VENDOR)/etc/media_profiles_V1_0.xml \
++    $(LOCAL_PATH)/configs/camera/yogurt_s5kgm1_pro.xml:$(TARGET_COPY_OUT_VENDOR)/etc/camera/yogurt_s5kgm1_pro.xml \
+ 
+ PRODUCT_COPY_FILES += \
+     frameworks/av/media/libstagefright/data/media_codecs_google_audio.xml:$(TARGET_COPY_OUT_VENDOR)/etc/media_codecs_google_audio.xml \
+@@ -274,6 +275,7 @@ PRODUCT_COPY_FILES += \
+ 
+ # Permissions
+ PRODUCT_COPY_FILES += \
++    $(LOCAL_PATH)/configs/permissions/privapp-permissions-camera.xml:$(TARGET_COPY_OUT_SYSTEM)/etc/permissions/privapp-permissions-camera.xml \
+     frameworks/native/data/etc/android.hardware.audio.low_latency.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.audio.low_latency.xml \
+     frameworks/native/data/etc/android.hardware.bluetooth.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.bluetooth.xml \
+     frameworks/native/data/etc/android.hardware.bluetooth_le.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.bluetooth_le.xml \
+diff --git a/rootdir/etc/fstab.mt6768 b/rootdir/etc/fstab.mt6768
+index 77a460a..cf5806e 100644
+--- a/rootdir/etc/fstab.mt6768
++++ b/rootdir/etc/fstab.mt6768
+@@ -6,17 +6,17 @@
+ # Currently we dont have e2fsck compiled. So fs check would failed.
+ 
+ # Core Partitions
+-system /system ext4 ro wait,,avb=vbmeta_system,logical,first_stage_mount,avb_keys=/avb/q-developer-gsi.avbpubkey:/avb/r-developer-gsi.avbpubkey:/avb/s-developer-gsi.avbpubkey,readahead_size_kb=128
+-vendor /vendor ext4 ro wait,,avb,logical,first_stage_mount,readahead_size_kb=128
+-product /product ext4 ro wait,,avb,logical,first_stage_mount
++system /system ext4 ro wait,avb=vbmeta_system,logical,first_stage_mount,avb_keys=/avb/q-developer-gsi.avbpubkey:/avb/r-developer-gsi.avbpubkey:/avb/s-developer-gsi.avbpubkey,readahead_size_kb=128
++vendor /vendor ext4 ro wait,avb,logical,first_stage_mount,readahead_size_kb=128
++product /product ext4 ro wait,avb,logical,first_stage_mount
+ /dev/block/platform/bootdevice/by-name/userdata /data f2fs noatime,nosuid,nodev,discard,noflush_merge,fsync_mode=nobarrier,reserve_root=134217,resgid=1065 wait,check,formattable,reservedsize=128m,latemount,checkpoint=fs,fileencryption=aes-256-xts,readahead_size_kb=128
+ /dev/block/platform/bootdevice/by-name/cache /cache ext4 noatime,nosuid,nodev,noauto_da_alloc,discard wait,check,formattable
+ /dev/block/platform/bootdevice/by-name/dtbo /dtbo emmc defaults defaults
+ /dev/block/platform/bootdevice/by-name/vbmeta /vbmeta emmc defaults defaults
+-/dev/block/platform/bootdevice/by-name/recovery /recovery emmc defaults first_stage_mount,nofail,
+-/dev/block/platform/bootdevice/by-name/boot /boot emmc defaults first_stage_mount,nofail,
+-/dev/block/platform/bootdevice/by-name/vbmeta_vendor /vbmeta_vendor emmc defaults first_stage_mount,nofail,
+-/dev/block/platform/bootdevice/by-name/vbmeta_system /vbmeta_system emmc defaults first_stage_mount,nofail,,avb=vbmeta
++/dev/block/platform/bootdevice/by-name/recovery /recovery emmc defaults first_stage_mount,nofail
++/dev/block/platform/bootdevice/by-name/boot /boot emmc defaults first_stage_mount,nofail
++/dev/block/platform/bootdevice/by-name/vbmeta_vendor /vbmeta_vendor emmc defaults first_stage_mount,nofail
++/dev/block/platform/bootdevice/by-name/vbmeta_system /vbmeta_system emmc defaults first_stage_mount,nofail,avb=vbmeta
+ 
+ # Misc Partitions
+ /dev/block/platform/bootdevice/by-name/md_udc /metadata ext4 noatime,nosuid,nodev,discard wait,formattable,first_stage_mount
+@@ -52,4 +52,4 @@ product /product ext4 ro wait,,avb,logical,first_stage_mount
+ /dev/block/platform/bootdevice/by-name/otp /otp emmc defaults defaults
+ 
+ # zRAM
+-/dev/block/zram0 none swap defaults zramsize=100%,max_comp_streams=8
++/dev/block/zram0 none swap defaults zramsize=60%,max_comp_streams=8
+diff --git a/rootdir/etc/init.ago.rc b/rootdir/etc/init.ago.rc
+index e203113..326e3ba 100644
+--- a/rootdir/etc/init.ago.rc
++++ b/rootdir/etc/init.ago.rc
+@@ -12,7 +12,7 @@ on post-fs-data && property:ro.crypto.state=unencrypted
+ 
+ on post-fs-data
+     write /proc/sys/vm/page-cluster 0
+-    swapon_all /vendor/etc/fstab.enableswap
++    swapon_all /vendor/etc/fstab.mt6768
+     write /dev/memcg/memory.swappiness 100
+     write /dev/memcg/apps/memory.swappiness 100
+     write /dev/memcg/system/memory.swappiness 100
+diff --git a/rootdir/etc/init.mt6768.rc b/rootdir/etc/init.mt6768.rc
+index c19e316..b2ba6ce 100644
+--- a/rootdir/etc/init.mt6768.rc
++++ b/rootdir/etc/init.mt6768.rc
+@@ -117,7 +117,6 @@ on fs
+     write /sys/block/zram0/comp_algorithm zstd
+     write /proc/sys/vm/page-cluster 0
+     write /proc/sys/vm/swappiness 100
+-    write /proc/sys/vm/direct_swappiness 60
+     write /proc/sys/vm/vfs_cache_pressure 100
+     write /proc/sys/vm/dirty_background_ratio 5
+     write /proc/sys/vm/dirty_ratio 15
+@@ -930,6 +929,13 @@ on property:sys.boot_completed=1
+     write /proc/sys/net/core/default_qdisc fq
+     write /proc/sys/net/ipv4/tcp_congestion_control bbr
+ 
++    # VM Memory Management (4GB LPDDR4X + 60% ZSTD ZRAM)
++    write /proc/sys/vm/watermark_scale_factor 150
++    write /proc/sys/vm/vfs_cache_pressure 100
++    write /proc/sys/vm/dirty_ratio 20
++    write /proc/sys/vm/dirty_background_ratio 5
++    write /proc/sys/vm/stat_interval 10
++
+ #service dpfd /vendor/bin/dpfd
+ #	user root
+ #	group system media
+@@ -1017,7 +1023,7 @@ service logger /system/bin/logcat -b all -D -f /cache/boot_log.txt
+     disabled
+     oneshot
+ 
+-on post-fs-data
++on post-fs-data && property:persist.vendor.log.boot=1
+     # Clear existing log and start the service
+     rm /cache/boot_log.txt
+     start logger
+diff --git a/system.prop b/system.prop
+index f3aa9f4..bc54531 100644
+--- a/system.prop
++++ b/system.prop
+@@ -42,8 +42,8 @@ ro.media.enc.jpeg.quality=100
+ persist.sys.front_camera_sound_type=1
+ persist.vendor.camera.HAL3.enabled=1
+ persist.vendor.camera.eis.enable=1
+-persist.vendor.camera.privapp.list=com.android.camera,com.google.camera,org.lineageos.aperture
+-vendor.camera.aux.packagelist=com.android.camera,com.google.camera,net.sourceforge.opencamera,org.lineageos.aperture
++persist.vendor.camera.privapp.list=com.android.camera,com.google.camera,org.lineageos.aperture,com.google.android.GoogleCamera,com.google.android.GoogleCameraEng,com.google.android.GoogleCameraGood,com.google.android.GoogleCamera.Urnyx,com.google.android.apps.cameralite
++vendor.camera.aux.packagelist=com.android.camera,com.google.camera,net.sourceforge.opencamera,org.lineageos.aperture,com.google.android.GoogleCamera,com.google.android.GoogleCameraEng,com.google.android.GoogleCameraGood,com.google.android.GoogleCamera.Urnyx,com.google.android.apps.cameralite
+ 
+ # IMS
+ persist.dbg.volte_avail_ovr=1
+diff --git a/vendor.prop b/vendor.prop
+index 120af0b..9ac0424 100644
+--- a/vendor.prop
++++ b/vendor.prop
+@@ -1,13 +1,14 @@
+ # Audio
+ ro.audio.silent=0
+ ro.audio.usb.period_us=16000
+-ro.lmk.kill_heaviest_task=true
+-ro.lmk.psi_partial_stall_ms=100
++# Android 17 LMKD PSI Tuning (4GB LPDDR4X + 60% ZSTD zRAM)
++ro.lmk.psi_partial_stall_ms=70
+ ro.lmk.psi_complete_stall_ms=700
+-ro.lmk.thrashing_limit=40
++ro.lmk.thrashing_limit=35
+ ro.lmk.thrashing_limit_decay=10
+-ro.lmk.swap_util_max=90
+-ro.lmk.swap_free_low_percentage=15
++ro.lmk.swap_free_low_percentage=10
++ro.lmk.swap_compression_ratio=3
++ro.lmk.direct_reclaim_threshold_ms=100
+ ro.vendor.have_aee_feature=1
+ ro.vendor.have_aeev_feature=1
+ ro.vendor.mtk_audio_alac_support=1
+@@ -159,9 +160,6 @@ ro.com.android.mobiledata=true
+ ro.control_privapp_permissions=enforce
+ ro.hardware.egl=mali
+ ro.kernel.zio=38,108,105,16
+-ro.lmk.downgrade_pressure=60
+-ro.lmk.kill_timeout_ms=100
+-ro.lmk.use_new_strategy=true
+ ro.logd.size=1048576
+ ro.opa.eligible_device=true
+ ro.postinstall.fstab.prefix=/system
+@@ -296,6 +294,7 @@ debug.sf.enable_transaction_tracing=false
+ debug.hwui.skia_atrace_enabled=false
+ debug.sf.enable_egl_image_tracker=0
+ debug.renderengine.backend=skiaglthreaded
++debug.hwui.renderer=skiagl
+ debug.sf.treat_170m_as_sRGB=1
+ 
+ # Zygote
+-- 
+2.53.0
+

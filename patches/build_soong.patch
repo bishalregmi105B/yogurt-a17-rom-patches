@@ -1,0 +1,43 @@
+diff --git a/java/java.go b/java/java.go
+index 24fe478..db8f6ea 100644
+--- a/java/java.go
++++ b/java/java.go
+@@ -3813,7 +3813,10 @@ func (m *DexImport) MinSdkVersionSupported(ctx android.BaseModuleContext) androi
+ func DexImportFactory() android.Module {
+ 	module := &DexImport{}
+ 
+-	module.AddProperties(&module.properties)
++	module.AddProperties(
++		&module.properties,
++		&module.dexpreoptProperties,
++	)
+ 
+ 	android.InitPrebuiltModule(module, &module.properties.Jars)
+ 	android.InitApexModule(module)
+diff --git a/scripts/check_boot_jars/package_allowed_list.txt b/scripts/check_boot_jars/package_allowed_list.txt
+index 970bb12..25fcccf 100644
+--- a/scripts/check_boot_jars/package_allowed_list.txt
++++ b/scripts/check_boot_jars/package_allowed_list.txt
+@@ -258,3 +258,8 @@ qcom.fmradio
+ ###################################################
+ # IFAA Manager used for Alipay and/or WeChat payment
+ org\.ifaa\.android\.manager.*
++
++###################################################
++# MediaTek IN Note 1 (yogurt) vendor boot jar (mediatek-framework.jar)
++com\.antaiui
++com\.antaiui\.internal
+diff --git a/scripts/gen_build_prop.py b/scripts/gen_build_prop.py
+index b40d3e2..818ed69 100644
+--- a/scripts/gen_build_prop.py
++++ b/scripts/gen_build_prop.py
+@@ -285,7 +285,8 @@ def write_properties_from_file(file):
+   # intermediate files are different.
+   # Print the filename for the intermediate files (files in OUT_DIR).
+   # This helps with validating mk->soong migration of android partitions.
+-  filename = os.path.basename(file.name) if file.name.startswith(os.environ.get("OUT_DIR")) else file.name
++  out_dir = os.environ.get("OUT_DIR", "out")
++  filename = os.path.basename(file.name) if (out_dir and file.name.startswith(out_dir)) else file.name
+   print()
+   print("####################################")
+   print(f"# from {filename}")

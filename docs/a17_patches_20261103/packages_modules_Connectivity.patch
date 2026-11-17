@@ -1,0 +1,87 @@
+diff --git a/bpf/loader/NetBpfLoad.cpp b/bpf/loader/NetBpfLoad.cpp
+index d4853ba..db762b0 100644
+--- a/bpf/loader/NetBpfLoad.cpp
++++ b/bpf/loader/NetBpfLoad.cpp
+@@ -1336,7 +1336,8 @@ static bool exists(const char* const path) {
+     abort();  // can only hit this if permissions (likely selinux) are screwed up
+ }
+ 
+-static bool loadObject(const char* const progPath, const bool useLibbpf = true) {
++static bool loadObject(const char* const progPath,
++                       const bool useLibbpf = isAtLeastKernelVersion(4, 19)) {
+     if (useLibbpf ? loadProgByLibbpf(progPath) : loadProg(progPath)) {
+         ALOGE("Failed to load object: %s, libbpf: %d", progPath, useLibbpf);
+         return false;
+@@ -1562,15 +1563,13 @@ static int doLoad(char** argv, char * const envp[]) {
+     // V bumps the kernel requirement up to 4.19
+     // see also: //system/netd/tests/kernel_test.cpp TestKernel419
+     if (isAtLeastV && !isAtLeastKernelVersion(4, 19)) {
+-        ALOGE("Android V requires kernel 4.19.");
+-        return 5;
++        ALOGW("Android V officially requires kernel 4.19 (running in 4.14+ eBPF-backported mode).");
+     }
+ 
+     // 25Q2 bumps the kernel requirement up to 5.4
+     // see also: //system/netd/tests/kernel_test.cpp TestKernel54
+     if (isAtLeast25Q2 && !isAtLeastKernelVersion(5, 4)) {
+-        ALOGE("Android 25Q2 requires kernel 5.4.");
+-        return 6;
++        ALOGW("Android 25Q2 officially requires kernel 5.4 (running in 4.14+ eBPF-backported mode).");
+     }
+ 
+     // 25Q4 bumps the kernel requirement up to 5.10
+@@ -1581,8 +1580,7 @@ static int doLoad(char** argv, char * const envp[]) {
+ 
+     // 26Q4 bumps the kernel requirement up to 5.15
+     if (isAtLeast26Q4 && !isAtLeastKernelVersion(5, 15)) {
+-        ALOGE("Android 26Q4 requires kernel 5.15.");
+-        return 7;
++        ALOGW("Android 26Q4 officially requires kernel 5.15 (running in 4.14+ eBPF-backported mode).");
+     }
+ 
+     // Technically already required by U, but only enforce on V+
+diff --git a/bpf/netd/BpfHandler.cpp b/bpf/netd/BpfHandler.cpp
+index 9b57548..854a1b4 100644
+--- a/bpf/netd/BpfHandler.cpp
++++ b/bpf/netd/BpfHandler.cpp
+@@ -131,12 +131,12 @@ static Result<void> initPrograms(const char* cg2_path) {
+ 
+     // V bumps the kernel requirement up to 4.19
+     if (isAtLeastV && !isAtLeastKernelVersion(4, 19)) {
+-        return Error() << "V+ platform with kernel version < 4.19.0 is unsupported";
++        ALOGW("V+ platform with kernel version < 4.19.0 (running in 4.14+ eBPF-backported mode)");
+     }
+ 
+     // 25Q2 bumps the kernel requirement up to 5.4
+     if (isAtLeast25Q2 && !isAtLeastKernelVersion(5, 4)) {
+-        return Error() << "25Q2+ platform with kernel version < 5.4.0 is unsupported";
++        ALOGW("25Q2+ platform with kernel version < 5.4.0 (running in 4.14+ eBPF-backported mode)");
+     }
+ 
+     unique_fd cg_fd(open(cg2_path, O_DIRECTORY | O_RDONLY | O_CLOEXEC));
+diff --git a/bpf/progs/netd.c b/bpf/progs/netd.c
+index e4cd7c9..bc0f980 100644
+--- a/bpf/progs/netd.c
++++ b/bpf/progs/netd.c
+@@ -1025,8 +1025,8 @@ DEFINE_NETD_BPF_PROG_RANGES(ingress, stats, 4_19, 5_4, T, 25Q2)
+ return bpf_traffic_account(skb, INGRESS, KVER_4_19, API(T));
+ }
+ 
+-// Android T 4.9 & T/U 4.14
+-DEFINE_NETD_BPF_PROG_RANGES(ingress, stats, 4_9, 4_19, T, V)
++// Android T 4.9 & T/U/17+ 4.14
++DEFINE_NETD_BPF_PROG_RANGES(ingress, stats, 4_9, 4_19, T, MAXAPI)
+ (struct __sk_buff* skb) {
+     return bpf_traffic_account(skb, INGRESS, KVER_4_9, API(T));
+ }
+@@ -1081,8 +1081,8 @@ DEFINE_NETD_BPF_PROG_RANGES(egress, stats, 4_19, 5_4, T, 25Q2)
+ return bpf_traffic_account(skb, EGRESS, KVER_4_19, API(T));
+ }
+ 
+-// Android T 4.9 & T/U 4.14
+-DEFINE_NETD_BPF_PROG_RANGES(egress, stats, 4_9, 4_19, T, V)
++// Android T 4.9 & T/U/17+ 4.14
++DEFINE_NETD_BPF_PROG_RANGES(egress, stats, 4_9, 4_19, T, MAXAPI)
+ (struct __sk_buff* skb) {
+     return bpf_traffic_account(skb, EGRESS, KVER_4_9, API(T));
+ }

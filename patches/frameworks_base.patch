@@ -1,0 +1,700 @@
+diff --git a/core/api/current.txt b/core/api/current.txt
+index 04010e0eb..e3cfad0c3 100644
+--- a/core/api/current.txt
++++ b/core/api/current.txt
+@@ -2476,6 +2476,10 @@ package android {
+     field public static final int zoom_plate = 17301655; // 0x1080097
+   }
+ 
++  public static final class R.font {
++    ctor public R.font();
++  }
++
+   public static final class R.fraction {
+     ctor public R.fraction();
+   }
+diff --git a/core/api/lint-baseline.txt b/core/api/lint-baseline.txt
+index b1b50772f..e8f5ea25b 100644
+--- a/core/api/lint-baseline.txt
++++ b/core/api/lint-baseline.txt
+@@ -1251,6 +1251,8 @@ UnflaggedApi: android.R.dimen#system_corner_radius_xlarge:
+     New API must be flagged with @FlaggedApi: field android.R.dimen.system_corner_radius_xlarge
+ UnflaggedApi: android.R.dimen#system_corner_radius_xsmall:
+     New API must be flagged with @FlaggedApi: field android.R.dimen.system_corner_radius_xsmall
++UnflaggedApi: android.R.font:
++    New API must be flagged with @FlaggedApi: class android.R.font
+ UnflaggedApi: android.accessibilityservice.AccessibilityService#OVERLAY_RESULT_INTERNAL_ERROR:
+     New API must be flagged with @FlaggedApi: field android.accessibilityservice.AccessibilityService.OVERLAY_RESULT_INTERNAL_ERROR
+ UnflaggedApi: android.accessibilityservice.AccessibilityService#OVERLAY_RESULT_INVALID:
+diff --git a/core/java/android/app/SystemServiceRegistry.java b/core/java/android/app/SystemServiceRegistry.java
+index 2858350a2..3541588a4 100644
+--- a/core/java/android/app/SystemServiceRegistry.java
++++ b/core/java/android/app/SystemServiceRegistry.java
+@@ -2347,6 +2347,9 @@ public final class SystemServiceRegistry {
+                     // If the Dropbox service is missing, we don't want to trigger a WTF, because
+                     // this can lead to an infinite loop in WTF reporting to Dropbox.
+                     return null;
++                case Context.OBSCURA_SERVICE:
++                    // ObscuraService intentionally returns null to processes disallowed by SEPolicy.
++                    return null;
+                 case Context.VCN_MANAGEMENT_SERVICE:
+                     if (!hasSystemFeatureOpportunistic(ctx,
+                             PackageManager.FEATURE_TELEPHONY_SUBSCRIPTION)) {
+diff --git a/core/java/android/provider/Settings.java b/core/java/android/provider/Settings.java
+index e0c49a181..3d1293c2e 100644
+--- a/core/java/android/provider/Settings.java
++++ b/core/java/android/provider/Settings.java
+@@ -4612,6 +4612,11 @@ public final class Settings {
+                 return Global.getStringForUser(resolver, name, userId);
+             }
+ 
++            if (HideDeveloperStatusUtils.shouldHideDevStatus(
++                    resolver, resolver.getPackageName(), name)) {
++                return "0";
++            }
++
+             return sNameValueCache.getStringForUser(resolver, name, userId);
+         }
+ 
+@@ -8569,6 +8574,11 @@ public final class Settings {
+                         " longer accessible. See API documentation for potential replacements.");
+             }
+ 
++            if (HideDeveloperStatusUtils.shouldHideDevStatus(
++                    resolver, resolver.getPackageName(), name)) {
++                return "0";
++            }
++
+             return sNameValueCache.getStringForUser(resolver, name, userId);
+         }
+ 
+@@ -21255,6 +21265,11 @@ public final class Settings {
+                         + " to android.provider.Settings.System, returning read-only value.");
+                 return System.getStringForUser(resolver, name, userHandle);
+             }
++            if (HideDeveloperStatusUtils.shouldHideDevStatus(
++                    resolver, resolver.getPackageName(), name)) {
++                return "0";
++            }
++
+             return sNameValueCache.getStringForUser(resolver, name, userHandle);
+         }
+ 
+diff --git a/core/java/com/android/internal/util/HideDeveloperStatusUtils.java b/core/java/com/android/internal/util/HideDeveloperStatusUtils.java
+index 82f10da4a..cc349d9da 100644
+--- a/core/java/com/android/internal/util/HideDeveloperStatusUtils.java
++++ b/core/java/com/android/internal/util/HideDeveloperStatusUtils.java
+@@ -2,6 +2,7 @@ package com.android.internal.util;
+ 
+ import android.content.ContentResolver;
+ import android.content.Context;
++import android.os.Process;
+ import android.os.UserHandle;
+ import android.provider.Settings;
+ 
+@@ -21,14 +22,42 @@ public class HideDeveloperStatusUtils {
+         Settings.Global.ADB_WIFI_ENABLED,
+         Settings.Global.DEVELOPMENT_SETTINGS_ENABLED
+     );
++    private static final Set<String> DEFAULT_HIDDEN_PACKAGES = Set.of(
++        "com.sbi.lotusintouch",
++        "com.sbi.SBIFreedomPlus",
++        "com.sbi.SBFreedomPlus",
++        "com.kotak.bank.mobile",
++        "com.kotak811app",
++        "com.msf.kbank.mobile",
++        "com.snapwork.hdfc",
++        "com.csam.icici.bank.imobile",
++        "com.axis.mobile",
++        "com.phonepe.app",
++        "net.one97.paytm",
++        "com.google.android.apps.nbu.paisa.user",
++        "in.org.npci.upiapp",
++        "com.f1soft.nabilmbank",
++        "com.f1soft.esewa",
++        "com.khalti"
++    );
+ 
+     public HideDeveloperStatusUtils(Context context) {
+         mContext = context;
+         mApps = getApps(context.getContentResolver());
+     }
+ 
++    public static boolean isHiddenApp(ContentResolver cr, String packageName) {
++        if (packageName == null || Process.myUid() < Process.FIRST_APPLICATION_UID) {
++            return false;
++        }
++        return DEFAULT_HIDDEN_PACKAGES.contains(packageName) || getApps(cr).contains(packageName);
++    }
++
+     public static boolean shouldHideDevStatus(ContentResolver cr, String packageName, String name) {
+-        return getApps(cr).contains(packageName) && SETTINGS_TO_HIDE.contains(name);
++        if (name == null || !SETTINGS_TO_HIDE.contains(name)) {
++            return false;
++        }
++        return isHiddenApp(cr, packageName);
+     }
+ 
+     private static Set<String> getApps(ContentResolver cr) {
+diff --git a/core/java/com/android/internal/util/PerAppsPropsUtils.java b/core/java/com/android/internal/util/PerAppsPropsUtils.java
+index 4d298c812..f2b198ed7 100644
+--- a/core/java/com/android/internal/util/PerAppsPropsUtils.java
++++ b/core/java/com/android/internal/util/PerAppsPropsUtils.java
+@@ -43,6 +43,7 @@ public final class PerAppsPropsUtils {
+         propsToChange.put("OP13", createOP13Props());
+         propsToChange.put("OP8P5G", createOP8P5GProps());
+         propsToChange.put("PXL", createPXLProps());
++        propsToChange.put("PXL10P", createPXL10PProps());
+         propsToChange.put("PXL10PXL", createPXL10PXLProps());
+         propsToChange.put("RM9P", createRM9PProps());
+         propsToChange.put("RM10P", createRM10PProps());
+@@ -207,6 +208,17 @@ public final class PerAppsPropsUtils {
+         return props;
+     }
+ 
++    private static Map<String, Object> createPXL10PProps() {
++        Map<String, Object> props = new HashMap<>();
++        props.put("BRAND", "google");
++        props.put("MANUFACTURER", "Google");
++        props.put("DEVICE", "blazer");
++        props.put("MODEL", "Pixel 10 Pro");
++        props.put("FINGERPRINT", "google/blazer/blazer:16/BP4A.251205.006/14401865:user/release-keys");
++        props.put("PRODUCT", "blazer");
++        return props;
++    }
++
+     private static Map<String, Object> createPXL10PXLProps() {
+         Map<String, Object> props = new HashMap<>();
+         props.put("BRAND", "google");
+diff --git a/core/java/com/android/internal/util/PropImitationHooks.java b/core/java/com/android/internal/util/PropImitationHooks.java
+index 3544f02f2..84cd44e77 100644
+--- a/core/java/com/android/internal/util/PropImitationHooks.java
++++ b/core/java/com/android/internal/util/PropImitationHooks.java
+@@ -164,6 +164,12 @@ public class PropImitationHooks {
+         } else if (!sNetflixModel.isEmpty() && packageName.equals(PACKAGE_NETFLIX)) {
+             dlog("Setting model to " + sNetflixModel + " for Netflix");
+             setPropValue("MODEL", sNetflixModel);
++        } else if (!android.os.Process.isIsolated()
++                && Process.myUid() >= Process.FIRST_APPLICATION_UID
++                && SystemProperties.getBoolean("persist.sys.pihooks.hide_bank_env", true)
++                && HideDeveloperStatusUtils.isHiddenApp(context.getContentResolver(), packageName)) {
++            dlog("Applying clean runtime & native properties for: " + packageName);
++            setCleanAppProps();
+         }
+     }
+ 
+@@ -200,6 +206,60 @@ public class PropImitationHooks {
+                 && !SystemProperties.getBoolean(PROP_DISABLE_GMS_PROPS, false);
+     }
+ 
++    private static void setCleanAppProps() {
++        if ("DerpFest".equals(Build.BRAND)) {
++            setPropValue("BRAND", "Micromax");
++        }
++        setPropValue("TYPE", "user");
++        setPropValue("TAGS", "release-keys");
++
++        if (sNativePropsApplied) {
++            return;
++        }
++        Map<String, String> props = new LinkedHashMap<>();
++        putIfExists(props, "init.svc.adbd", "stopped");
++        putIfExists(props, "sys.usb.state", "mtp");
++        putIfExists(props, "sys.usb.config", "mtp");
++        putIfExists(props, "persist.sys.usb.config", "mtp");
++        putIfExists(props, "sys.usb.ffs.ready", "0");
++        putIfExists(props, "ro.boot.flash.locked", "1");
++        putIfExists(props, "ro.boot.vbmeta.device_state", "locked");
++        putIfExists(props, "ro.boot.verifiedbootstate", "green");
++        putIfExists(props, "ro.boot.veritymode", "enforcing");
++        putIfExists(props, "ro.debuggable", "0");
++        putIfExists(props, "ro.secure", "1");
++        putIfExists(props, "ro.build.type", "user");
++        putIfExists(props, "ro.build.tags", "release-keys");
++        putIfExists(props, "ro.build.flavor", "yogurt-user");
++        putIfExists(props, "ro.build.description",
++                "E7746-user 10 QP1A.190711.020 1620836268 release-keys");
++        if ("DerpFest".equals(SystemProperties.get("ro.product.brand", ""))) {
++            props.put("ro.product.brand", "Micromax");
++        }
++        for (String part : new String[] {
++                "vendor", "odm", "product", "system", "system_ext", "system_dlkm",
++                "bootimage", "vendor_dlkm"}) {
++            String key = "ro.product." + part + ".brand";
++            if ("DerpFest".equals(SystemProperties.get(key, ""))) {
++                props.put(key, "Micromax");
++            }
++        }
++        props.put("!ro.derpfest.", "1");
++        props.put("!ro.lineage.", "1");
++        props.put("!persist.sys.derpfest", "1");
++        props.put("!persist.sys.pihooks", "1");
++
++        String[] keys = props.keySet().toArray(new String[0]);
++        String[] values = props.values().toArray(new String[0]);
++        try {
++            if (nativeSpoofProperties(keys, values, DEBUG)) {
++                sNativePropsApplied = true;
++            }
++        } catch (Throwable t) {
++            Log.e(TAG, "Failed to apply clean app native properties", t);
++        }
++    }
++
+     private static void setPlayIntegrityProps(Context context) {
+         if (!isPiSpoofEnabled()) {
+             dlog("GMS prop imitation is disabled by user");
+diff --git a/packages/SystemUI/compose/features/src/com/android/systemui/notifications/ui/composable/Notifications.kt b/packages/SystemUI/compose/features/src/com/android/systemui/notifications/ui/composable/Notifications.kt
+index b302da3e6..d12f19475 100644
+--- a/packages/SystemUI/compose/features/src/com/android/systemui/notifications/ui/composable/Notifications.kt
++++ b/packages/SystemUI/compose/features/src/com/android/systemui/notifications/ui/composable/Notifications.kt
+@@ -91,6 +91,7 @@ import com.android.compose.animation.scene.ContentScope
+ import com.android.compose.animation.scene.ElementKey
+ import com.android.compose.animation.scene.HeadsUpContentPicker
+ import com.android.compose.animation.scene.SceneTransitionLayoutState
++import com.android.compose.gesture.NestedScrollableBound
+ import com.android.compose.gesture.effect.OffsetOverscrollEffect
+ import com.android.compose.gesture.effect.rememberOffsetOverscrollEffect
+ import com.android.compose.modifiers.onUnplaced
+@@ -230,6 +231,7 @@ fun ContentScope.ScrollingNotificationPanel(
+             ScrollState(initial = 0)
+         },
+     onEmptySpaceClick: (() -> Unit)? = null,
++    disableSwipesBounds: NestedScrollableBound = NestedScrollableBound.Any,
+ ) {
+     val scrollingContentOverscrollEffect = rememberOffsetOverscrollEffect()
+     val shortContentOverscrollEffect = rememberOffsetOverscrollEffect()
+@@ -291,6 +293,7 @@ fun ContentScope.ScrollingNotificationPanel(
+         shortContentOverscrollEffect = shortContentOverscrollEffect,
+         onEmptySpaceClick = onEmptySpaceClick,
+         onStackHeightChanged = { /* no-op without nested scroll */ },
++        disableSwipesBounds = disableSwipesBounds,
+     )
+ }
+ 
+@@ -320,6 +323,7 @@ fun ContentScope.NestedScrollingNotificationPanel(
+     onEmptySpaceClick: (() -> Unit)? = null,
+     onStackHeightChanged: (Int) -> Unit = {},
+     allowSwipeToExpandChildren: () -> Boolean = { contentScrollState.value == 0 },
++    disableSwipesBounds: NestedScrollableBound = NestedScrollableBound.Any,
+ ) {
+     /**
+      * Space available for the notification stack on the screen. These bounds don't scroll off the
+@@ -528,7 +532,7 @@ fun ContentScope.NestedScrollingNotificationPanel(
+                                 layoutCoordinates = null
+                             }
+                             .debugBackground(viewModel, DEBUG_BOX_COLOR)
+-                            .disableSwipesWhenScrolling() // prevents scene changes
++                            .disableSwipesWhenScrolling(disableSwipesBounds) // prevents scene changes
+                             .thenIf(!NsslTouchDispatchFix.isEnabled) {
+                                 Modifier.nestedScroll(swipeToExpandNotificationScrollConnection)
+                             }
+diff --git a/packages/SystemUI/compose/features/src/com/android/systemui/notifications/ui/composable/NotificationsShadeOverlay.kt b/packages/SystemUI/compose/features/src/com/android/systemui/notifications/ui/composable/NotificationsShadeOverlay.kt
+index 48f6c4db0..746759054 100644
+--- a/packages/SystemUI/compose/features/src/com/android/systemui/notifications/ui/composable/NotificationsShadeOverlay.kt
++++ b/packages/SystemUI/compose/features/src/com/android/systemui/notifications/ui/composable/NotificationsShadeOverlay.kt
+@@ -40,6 +40,7 @@ import com.android.compose.animation.scene.ContentScope
+ import com.android.compose.animation.scene.ElementKey
+ import com.android.compose.animation.scene.UserAction
+ import com.android.compose.animation.scene.UserActionResult
++import com.android.compose.gesture.NestedScrollableBound
+ import com.android.compose.lifecycle.DisposableEffectWithLifecycle
+ import com.android.compose.lifecycle.LaunchedEffectWithLifecycle
+ import com.android.internal.jank.InteractionJankMonitor
+@@ -217,6 +218,7 @@ constructor(
+                         }
+                     },
+                     shouldDrawScrimBackground = false,
++                    disableSwipesBounds = NestedScrollableBound.TopOrLeft,
+                     modifier =
+                         Modifier.fillMaxWidth().focusProperties {
+                             // The `ScrollingNotificationPanel` is a compose placeholder. Therefore,
+diff --git a/packages/SystemUI/compose/features/src/com/android/systemui/scene/ui/composable/SceneContainer.kt b/packages/SystemUI/compose/features/src/com/android/systemui/scene/ui/composable/SceneContainer.kt
+index 3fc6e67d2..7b7933f29 100644
+--- a/packages/SystemUI/compose/features/src/com/android/systemui/scene/ui/composable/SceneContainer.kt
++++ b/packages/SystemUI/compose/features/src/com/android/systemui/scene/ui/composable/SceneContainer.kt
+@@ -376,5 +376,5 @@ private fun InternalSceneContainer(
+ }
+ 
+ object SceneContainerDefaults {
+-    val SwipeVelocityThreshold = 250.dp
++    val SwipeVelocityThreshold = 160.dp
+ }
+diff --git a/packages/SystemUI/compose/features/src/com/android/systemui/scene/ui/composable/transitions/ToNotificationsShadeTransition.kt b/packages/SystemUI/compose/features/src/com/android/systemui/scene/ui/composable/transitions/ToNotificationsShadeTransition.kt
+index 3b7b771ff..27bb945b9 100644
+--- a/packages/SystemUI/compose/features/src/com/android/systemui/scene/ui/composable/transitions/ToNotificationsShadeTransition.kt
++++ b/packages/SystemUI/compose/features/src/com/android/systemui/scene/ui/composable/transitions/ToNotificationsShadeTransition.kt
+@@ -61,4 +61,4 @@ fun TransitionBuilder.toNotificationsShadeTransition(
+     fractionRange(end = .5f) { fade(OverlayShade.Elements.Scrim) }
+ }
+ 
+-private val DefaultDuration = 300.milliseconds
++private val DefaultDuration = 220.milliseconds
+diff --git a/packages/SystemUI/compose/features/src/com/android/systemui/scene/ui/composable/transitions/ToQuickSettingsShadeTransition.kt b/packages/SystemUI/compose/features/src/com/android/systemui/scene/ui/composable/transitions/ToQuickSettingsShadeTransition.kt
+index 93b18054b..8aff47c91 100644
+--- a/packages/SystemUI/compose/features/src/com/android/systemui/scene/ui/composable/transitions/ToQuickSettingsShadeTransition.kt
++++ b/packages/SystemUI/compose/features/src/com/android/systemui/scene/ui/composable/transitions/ToQuickSettingsShadeTransition.kt
+@@ -46,4 +46,4 @@ fun TransitionBuilder.toQuickSettingsShadeTransition(
+     }
+ }
+ 
+-private val DefaultDuration = 300.milliseconds
++private val DefaultDuration = 220.milliseconds
+diff --git a/packages/SystemUI/compose/features/src/com/android/systemui/shade/ui/composable/OverlayShade.kt b/packages/SystemUI/compose/features/src/com/android/systemui/shade/ui/composable/OverlayShade.kt
+index bece5659a..c2ace9b48 100644
+--- a/packages/SystemUI/compose/features/src/com/android/systemui/shade/ui/composable/OverlayShade.kt
++++ b/packages/SystemUI/compose/features/src/com/android/systemui/shade/ui/composable/OverlayShade.kt
+@@ -50,10 +50,12 @@ import androidx.compose.ui.unit.dp
+ import com.android.compose.animation.scene.ContentScope
+ import com.android.compose.animation.scene.ElementKey
+ import com.android.compose.animation.scene.LowestZIndexContentPicker
++import com.android.compose.gesture.NestedScrollableBound
+ import com.android.compose.modifiers.thenIf
+ import com.android.mechanics.behavior.VerticalExpandContainerSpec
+ import com.android.mechanics.behavior.verticalExpandContainerBackground
+ import com.android.mechanics.compose.modifier.motionDriver
++import com.android.mechanics.spring.SpringParameters
+ import com.android.systemui.qs.ui.composable.TileRevealFlag
+ import com.android.systemui.res.R
+ import com.android.systemui.scene.ui.composable.LocalSceneContainerPreloadedResources
+@@ -195,7 +197,7 @@ private fun ContentScope.Panel(
+     Box(
+         modifier =
+             modifier
+-                .disableSwipesWhenScrolling()
++                .disableSwipesWhenScrolling(NestedScrollableBound.TopOrLeft)
+                 .verticalExpandContainerBackground(Colors.panelBackground(enableTransparency), spec)
+     ) {
+         overlay()
+@@ -290,7 +292,12 @@ object OverlayShade {
+     fun rememberShadeExpansionMotion(isFullWidth: Boolean): VerticalExpandContainerSpec {
+         val radius = Dimensions.PanelCornerRadius
+         return remember(radius, isFullWidth) {
+-            VerticalExpandContainerSpec(isFloating = !isFullWidth, radius = radius)
++            VerticalExpandContainerSpec(
++                isFloating = !isFullWidth,
++                radius = radius,
++                attachSpring = SpringParameters(stiffness = 780f, dampingRatio = 0.88f),
++                detachSpring = SpringParameters(stiffness = 780f, dampingRatio = 0.88f),
++            )
+         }
+     }
+ }
+diff --git a/packages/SystemUI/src/com/android/systemui/screenrecord/RecordingService.java b/packages/SystemUI/src/com/android/systemui/screenrecord/RecordingService.java
+index c73989304..5cee3ac25 100644
+--- a/packages/SystemUI/src/com/android/systemui/screenrecord/RecordingService.java
++++ b/packages/SystemUI/src/com/android/systemui/screenrecord/RecordingService.java
+@@ -249,7 +249,7 @@ public class RecordingService extends Service implements ScreenMediaRecorderList
+                 Log.d(getTag(), "recording with audio source " + mAudioSource);
+                 mLowQuality = intent.getBooleanExtra(EXTRA_LOW_QUALITY, false);
+                 mLongerDuration = intent.getBooleanExtra(EXTRA_LONGER_DURATION, false);
+-                mHEVC = intent.getBooleanExtra(EXTRA_HEVC, true);
++                mHEVC = intent.getBooleanExtra(EXTRA_HEVC, false);
+                 mKeepScreenAwake = intent.getBooleanExtra(EXTRA_KEEP_SCREEN_AWAKE, false);
+ 
+                 MediaProjectionCaptureTarget captureTarget =
+diff --git a/packages/SystemUI/src/com/android/systemui/screenrecord/ScreenMediaRecorder.java b/packages/SystemUI/src/com/android/systemui/screenrecord/ScreenMediaRecorder.java
+index c4703de2e..6d62d97ba 100644
+--- a/packages/SystemUI/src/com/android/systemui/screenrecord/ScreenMediaRecorder.java
++++ b/packages/SystemUI/src/com/android/systemui/screenrecord/ScreenMediaRecorder.java
+@@ -313,14 +313,16 @@ public class ScreenMediaRecorder {
+         // Check if we can support screen size as-is
+         int width = vc.getSupportedWidths().getUpper();
+         int height = vc.getSupportedHeights().getUpper();
++        int widthAlignment = Math.max(16, vc.getWidthAlignment());
++        int heightAlignment = Math.max(16, vc.getHeightAlignment());
+ 
+         int screenWidthAligned = screenWidth;
+-        if (screenWidthAligned % vc.getWidthAlignment() != 0) {
+-            screenWidthAligned -= (screenWidthAligned % vc.getWidthAlignment());
++        if (screenWidthAligned % widthAlignment != 0) {
++            screenWidthAligned -= (screenWidthAligned % widthAlignment);
+         }
+         int screenHeightAligned = screenHeight;
+-        if (screenHeightAligned % vc.getHeightAlignment() != 0) {
+-            screenHeightAligned -= (screenHeightAligned % vc.getHeightAlignment());
++        if (screenHeightAligned % heightAlignment != 0) {
++            screenHeightAligned -= (screenHeightAligned % heightAlignment);
+         }
+ 
+         if (width >= screenWidthAligned && height >= screenHeightAligned
+@@ -346,11 +348,11 @@ public class ScreenMediaRecorder {
+ 
+         int scaledWidth = (int) (screenWidth * scale);
+         int scaledHeight = (int) (screenHeight * scale);
+-        if (scaledWidth % vc.getWidthAlignment() != 0) {
+-            scaledWidth -= (scaledWidth % vc.getWidthAlignment());
++        if (scaledWidth % widthAlignment != 0) {
++            scaledWidth -= (scaledWidth % widthAlignment);
+         }
+-        if (scaledHeight % vc.getHeightAlignment() != 0) {
+-            scaledHeight -= (scaledHeight % vc.getHeightAlignment());
++        if (scaledHeight % heightAlignment != 0) {
++            scaledHeight -= (scaledHeight % heightAlignment);
+         }
+ 
+         // Find max supported rate for size
+diff --git a/packages/SystemUI/src/com/android/systemui/screenrecord/ScreenRecordPermissionContentManager.kt b/packages/SystemUI/src/com/android/systemui/screenrecord/ScreenRecordPermissionContentManager.kt
+index 2965181b1..9a180606a 100644
+--- a/packages/SystemUI/src/com/android/systemui/screenrecord/ScreenRecordPermissionContentManager.kt
++++ b/packages/SystemUI/src/com/android/systemui/screenrecord/ScreenRecordPermissionContentManager.kt
+@@ -312,7 +312,7 @@ class ScreenRecordPermissionContentManager(
+         audioSwitch.isChecked = Prefs.getInt(userContext, PREF_AUDIO, 0) == 1
+         options.setSelection(Prefs.getInt(userContext, PREF_AUDIO_SOURCE, 0))
+         skipTimeSwitch.isChecked = Prefs.getInt(userContext, PREF_SKIP, 0) == 1
+-        hevcSwitch.isChecked = Prefs.getInt(userContext, PREF_HEVC, 1) == 1
++        hevcSwitch.isChecked = Prefs.getInt(userContext, PREF_HEVC, 0) == 1
+         keepAwakeSwitch.isChecked = Prefs.getInt(userContext, PREF_KEEP_AWAKE, 0) == 1
+     }
+ 
+diff --git a/services/core/java/com/android/server/policy/PhoneWindowManager.java b/services/core/java/com/android/server/policy/PhoneWindowManager.java
+index 4abd90ee0..034c877d8 100644
+--- a/services/core/java/com/android/server/policy/PhoneWindowManager.java
++++ b/services/core/java/com/android/server/policy/PhoneWindowManager.java
+@@ -130,6 +130,7 @@ import android.app.ActivityOptions;
+ import android.app.ActivityTaskManager;
+ import android.app.ActivityTaskManager.RootTaskInfo;
+ import android.app.AlarmManager;
++import android.app.AlertDialog;
+ import android.app.AppOpsManager;
+ import android.app.BroadcastOptions;
+ import android.app.IActivityManager;
+@@ -145,6 +146,7 @@ import android.content.BroadcastReceiver;
+ import android.content.ComponentName;
+ import android.content.ContentResolver;
+ import android.content.Context;
++import android.content.DialogInterface;
+ import android.content.Intent;
+ import android.content.IntentFilter;
+ import android.content.PermissionChecker;
+@@ -951,6 +953,121 @@ public class PhoneWindowManager implements WindowManagerPolicy {
+         }
+     }
+ 
++    // Extra hardware button (e.g. Micromax IN Note 1 dedicated assistant button)
++    private boolean mExtraButtonLongPressed = false;
++    private final Runnable mExtraButtonLongPressRunnable = new Runnable() {
++        @Override
++        public void run() {
++            mExtraButtonLongPressed = true;
++            performHapticFeedback(HapticFeedbackConstants.LONG_PRESS, "Extra Button - Long Press");
++            showExtraButtonAppPicker();
++        }
++    };
++
++    private void handleExtraButtonEvent(KeyEvent event, int policyFlags) {
++        final boolean down = event.getAction() == KeyEvent.ACTION_DOWN;
++        final boolean interactive = (policyFlags & WindowManagerPolicy.FLAG_INTERACTIVE) != 0;
++
++        if (!interactive) {
++            if (down) {
++                wakeUpFromWakeKey(event);
++            }
++            return;
++        }
++
++        if (down) {
++            if (event.getRepeatCount() == 0) {
++                mExtraButtonLongPressed = false;
++                mHandler.postDelayed(mExtraButtonLongPressRunnable, 500);
++            }
++        } else {
++            mHandler.removeCallbacks(mExtraButtonLongPressRunnable);
++            if (mExtraButtonLongPressed) {
++                mExtraButtonLongPressed = false;
++            } else {
++                performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY, "Extra Button - Press");
++                handleExtraButtonPress(false);
++            }
++        }
++    }
++
++    private void handleExtraButtonPress(boolean forcePicker) {
++        final ContentResolver resolver = mContext.getContentResolver();
++        final PackageManager pm = mContext.getPackageManager();
++        final String selectedPkg = Settings.System.getString(resolver, "extra_button_app");
++
++        if (!forcePicker && selectedPkg != null && !selectedPkg.isEmpty()) {
++            Intent launchIntent = pm.getLaunchIntentForPackage(selectedPkg);
++            if (launchIntent != null) {
++                launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
++                        | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
++                if (mKeyguardDelegate != null && mKeyguardDelegate.isShowing()) {
++                    mKeyguardDelegate.dismissKeyguardToLaunch(launchIntent);
++                } else {
++                    startActivityAsUser(launchIntent, UserHandle.CURRENT_OR_SELF);
++                }
++                return;
++            }
++            Settings.System.putString(resolver, "extra_button_app", null);
++        }
++
++        showExtraButtonAppPicker();
++    }
++
++    private void showExtraButtonAppPicker() {
++        mHandler.post(new Runnable() {
++            @Override
++            public void run() {
++                final PackageManager pm = mContext.getPackageManager();
++                final Intent mainIntent = new Intent(Intent.ACTION_MAIN, null);
++                mainIntent.addCategory(Intent.CATEGORY_LAUNCHER);
++
++                final List<ResolveInfo> apps = pm.queryIntentActivities(mainIntent, 0);
++                if (apps == null || apps.isEmpty()) {
++                    Slog.e(TAG, "No launchable apps found for extra button picker!");
++                    return;
++                }
++
++                apps.sort(new ResolveInfo.DisplayNameComparator(pm));
++
++                final int count = apps.size();
++                final String[] appNames = new String[count];
++                final String[] pkgNames = new String[count];
++                for (int i = 0; i < count; i++) {
++                    ResolveInfo ri = apps.get(i);
++                    CharSequence label = ri.loadLabel(pm);
++                    appNames[i] = (label != null) ? label.toString() : ri.activityInfo.packageName;
++                    pkgNames[i] = ri.activityInfo.packageName;
++                }
++
++                AlertDialog.Builder builder = new AlertDialog.Builder(mContext);
++                builder.setTitle("Select app for Extra Button");
++                builder.setItems(appNames, new DialogInterface.OnClickListener() {
++                    @Override
++                    public void onClick(DialogInterface dialog, int which) {
++                        String chosenPkg = pkgNames[which];
++                        Settings.System.putString(mContext.getContentResolver(), "extra_button_app", chosenPkg);
++                        Intent launchIntent = pm.getLaunchIntentForPackage(chosenPkg);
++                        if (launchIntent != null) {
++                            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
++                                    | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
++                            if (mKeyguardDelegate != null && mKeyguardDelegate.isShowing()) {
++                                mKeyguardDelegate.dismissKeyguardToLaunch(launchIntent);
++                            } else {
++                                startActivityAsUser(launchIntent, UserHandle.CURRENT_OR_SELF);
++                            }
++                        }
++                    }
++                });
++                builder.setNegativeButton(android.R.string.cancel, null);
++
++                AlertDialog dialog = builder.create();
++                dialog.getWindow().setType(WindowManager.LayoutParams.TYPE_KEYGUARD_DIALOG);
++                dialog.show();
++            }
++        });
++    }
++
+     private UEventObserver mHDMIObserver = new UEventObserver() {
+         @Override
+         public void onUEvent(UEventObserver.UEvent event) {
+@@ -5194,6 +5311,11 @@ public class PhoneWindowManager implements WindowManagerPolicy {
+             }
+         }
+ 
++        if (keyCode == KeyEvent.KEYCODE_MOVE_HOME) {
++            handleExtraButtonEvent(event, policyFlags);
++            return 0;
++        }
++
+         final boolean canceled = event.isCanceled();
+         final int displayId = event.getDisplayId();
+         final boolean isInjected = (policyFlags & WindowManagerPolicy.FLAG_INJECTED) != 0;
+diff --git a/services/core/java/com/android/server/power/hint/HintManagerService.java b/services/core/java/com/android/server/power/hint/HintManagerService.java
+index 5d9e51289..15d0027fe 100644
+--- a/services/core/java/com/android/server/power/hint/HintManagerService.java
++++ b/services/core/java/com/android/server/power/hint/HintManagerService.java
+@@ -322,14 +322,19 @@ public final class HintManagerService extends SystemService {
+                 LocalServices.getService(ActivityManagerInternal.class));
+         mPowerHal = injector.createIPower();
+         mPowerHalVersion = 0;
+-        mVendorApiLevel = Integer.parseInt(SystemProperties.get(PROPERTY_VENDOR_API_LEVEL, ""));
++        String apiLevelStr = SystemProperties.get(PROPERTY_VENDOR_API_LEVEL, "29");
++        int vendorApiLevel = 29;
++        try {
++            vendorApiLevel = apiLevelStr.isEmpty() ? 29 : Integer.parseInt(apiLevelStr);
++        } catch (NumberFormatException e) {
++            vendorApiLevel = 29;
++        }
++        mVendorApiLevel = vendorApiLevel;
+         mUsesFmq = false;
+-        if (mPowerHal != null) {
+-            try {
+-                mSupportInfo = getSupportInfo();
+-            } catch (RemoteException e) {
+-                throw new IllegalStateException("Could not contact PowerHAL!", e);
+-            }
++        try {
++            mSupportInfo = getSupportInfo();
++        } catch (RemoteException e) {
++            throw new IllegalStateException("Could not contact PowerHAL!", e);
+         }
+         if (mSupportInfo.headroom.isCpuSupported) {
+             mCpuHeadroomCache = new HeadroomCache<>(2, mSupportInfo.headroom.cpuMinIntervalMillis);
+@@ -362,13 +367,15 @@ public final class HintManagerService extends SystemService {
+     }
+ 
+     SupportInfo getSupportInfo() throws RemoteException {
+-        try {
+-            mPowerHalVersion = mPowerHal.getInterfaceVersion();
+-            if (mPowerHalVersion >= 6) {
+-                return mPowerHal.getSupportInfo();
++        if (mPowerHal != null) {
++            try {
++                mPowerHalVersion = mPowerHal.getInterfaceVersion();
++                if (mPowerHalVersion >= 6) {
++                    return mPowerHal.getSupportInfo();
++                }
++            } catch (RemoteException e) {
++                throw new IllegalStateException("Could not contact PowerHAL!", e);
+             }
+-        } catch (RemoteException e) {
+-            throw new IllegalStateException("Could not contact PowerHAL!", e);
+         }
+ 
+         SupportInfo supportInfo = new SupportInfo();
+diff --git a/services/core/java/com/android/server/security/FileIntegrity.java b/services/core/java/com/android/server/security/FileIntegrity.java
+index b8f187e0e..f208ef78f 100644
+--- a/services/core/java/com/android/server/security/FileIntegrity.java
++++ b/services/core/java/com/android/server/security/FileIntegrity.java
+@@ -46,6 +46,9 @@ public final class FileIntegrity {
+      */
+     @SystemApi(client = SystemApi.Client.SYSTEM_SERVER)
+     public static void setUpFsVerity(@NonNull File file) throws IOException {
++        if (!VerityUtils.isFsVeritySupported()) {
++            return;
++        }
+         try (ParcelFileDescriptor pfd = ParcelFileDescriptor.open(file, MODE_READ_ONLY)) {
+             setUpFsVerity(pfd);
+         }
+@@ -63,6 +66,9 @@ public final class FileIntegrity {
+     @SystemApi(client = SystemApi.Client.SYSTEM_SERVER)
+     public static void setUpFsVerity(@NonNull ParcelFileDescriptor parcelFileDescriptor)
+             throws IOException {
++        if (!VerityUtils.isFsVeritySupported()) {
++            return;
++        }
+         VerityUtils.setUpFsverity(parcelFileDescriptor.getFd());
+     }
+ }
+diff --git a/telephony/java/android/telephony/SubscriptionManager.java b/telephony/java/android/telephony/SubscriptionManager.java
+index 0583761ff..d507be3ab 100644
+--- a/telephony/java/android/telephony/SubscriptionManager.java
++++ b/telephony/java/android/telephony/SubscriptionManager.java
+@@ -5443,4 +5443,15 @@ public class SubscriptionManager {
+             throw ex.rethrowFromSystemServer();
+         }
+     }
++
++    /**
++     * Legacy compatibility helper for vendor telephony/IMS stacks.
++     *
++     * @param slotIndex The SIM slot index.
++     * @return The SIM state constant from {@link TelephonyManager}.
++     * @hide
++     */
++    public static int getSimStateForSlotIndex(int slotIndex) {
++        return TelephonyManager.getSimStateForSlotIndex(slotIndex);
++    }
+ }

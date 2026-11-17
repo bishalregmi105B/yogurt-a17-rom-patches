@@ -1,0 +1,7 @@
+ M packages/SystemUI/src/com/android/systemui/screenrecord/RecordingService.java
+ M packages/SystemUI/src/com/android/systemui/screenrecord/ScreenMediaRecorder.java
+ M packages/SystemUI/src/com/android/systemui/screenrecord/ScreenRecordPermissionContentManager.kt
+ M services/core/java/com/android/server/policy/PhoneWindowManager.java
+ M services/core/java/com/android/server/power/hint/HintManagerService.java
+ M services/core/java/com/android/server/security/FileIntegrity.java
+ M telephony/java/android/telephony/SubscriptionManager.java
