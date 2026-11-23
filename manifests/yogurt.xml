@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  yogurt = Micromax IN Note 1 (E7746/mt6768/Helio G85)
+  DerpFest 17 bring-up manifest (lineage-24.0 stack, release config cp2a).
+
+  A17 campaign (2026-11-03): device/vendor/sepolicy trees ride the fork's
+  `seventeen` branches (evolved from `sixteen` = Android 16 QPR2 proven
+  bring-up). Kernel moved to SOURCE build on the fork
+  bishalregmi105B/yogurt, branch `seventeen` = upstream android-15.0 tip
+  (b397cfb99) + FocalTech EINT rising fix (commit 48f71bbc1); eBPF Kconfig
+  commits land during Phase-2. hardware/mediatek pinned lineage-24.0.
+-->
+<manifest>
+
+  <remote name="yogurt-gh" fetch="https://github.com/bishalregmi105B" revision="seventeen"/>
+  <remote name="lineage-mtk" fetch="https://github.com/LineageOS"/>
+
+  <!-- Device tree (fork: A16 QPR2 bring-up -> A17 evolution) -->
+  <project path="device/micromax/yogurt"
+           name="android_device_micromax_yogurt"
+           remote="yogurt-gh"/>
+
+  <!-- Vendor tree (blobs + proprietary files) -->
+  <project path="vendor/micromax/yogurt"
+           name="android_vendor_micromax_yogurt"
+           remote="yogurt-gh"/>
+
+  <!-- MTK sepolicy vndr (ArrowOS fork base; user fork branch seventeen) -->
+  <project path="device/mediatek/sepolicy_vndr"
+           name="android_device_mediatek_sepolicy_vndr"
+           remote="yogurt-gh"/>
+
+  <!-- Kernel source, Phase 2 (fork of SakthivelNadar/yogurt, branch seventeen) -->
+  <project path="kernel/micromax/yogurt"
+           name="yogurt"
+           remote="yogurt-gh"/>
+
+  <!-- Aperture Camera with MTK ISP hardware controls (fork, branch seventeen) -->
+  <remove-project name="LineageOS/android_packages_apps_Aperture"/>
+  <project path="packages/apps/Aperture"
+           name="android_packages_apps_Aperture"
+           remote="yogurt-gh"/>
+
+  <!-- hardware/mediatek (LineageOS branch matching the 24.0 target) -->
+  <project path="hardware/mediatek"
+           name="android_hardware_mediatek"
+           remote="lineage-mtk"
+           revision="lineage-24.0"/>
+
+  <!-- GKI kernel prebuilts: yogurt builds 4.14 from source (TARGET_KERNEL_SOURCE).
+       Blob-only ~15-20 GB of A17 GKI trees + virtual-device modules are dead
+       weight for this build; drop them from the manifest entirely. -->
+  <remove-project name="kernel/prebuilts/6.1/arm64"/>
+  <remove-project name="kernel/prebuilts/6.1/x86-64"/>
+  <remove-project name="kernel/prebuilts/6.6/arm64"/>
+  <remove-project name="kernel/prebuilts/6.6/x86-64"/>
+  <remove-project name="kernel/prebuilts/6.12/arm64"/>
+  <remove-project name="kernel/prebuilts/6.12/x86-64"/>
+  <remove-project name="kernel/prebuilts/6.18/arm64"/>
+  <remove-project name="kernel/prebuilts/6.18/x86-64"/>
+  <remove-project name="kernel/prebuilts/mainline/arm64"/>
+  <remove-project name="kernel/prebuilts/mainline/x86-64"/>
+  <remove-project name="kernel/prebuilts/common-modules/trusty/6.12/arm64"/>
+  <remove-project name="kernel/prebuilts/common-modules/trusty/6.6/arm64"/>
+  <remove-project name="kernel/prebuilts/common-modules/virtual-device/6.1/arm64"/>
+  <remove-project name="kernel/prebuilts/common-modules/virtual-device/6.1/x86-64"/>
+  <remove-project name="kernel/prebuilts/common-modules/virtual-device/6.6/arm64"/>
+  <remove-project name="kernel/prebuilts/common-modules/virtual-device/6.6/x86-64"/>
+  <remove-project name="kernel/prebuilts/common-modules/virtual-device/6.12/arm64"/>
+  <remove-project name="kernel/prebuilts/common-modules/virtual-device/6.12/x86-64"/>
+  <remove-project name="kernel/prebuilts/common-modules/virtual-device/6.18/arm64"/>
+  <remove-project name="kernel/prebuilts/common-modules/virtual-device/6.18/x86-64"/>
+  <remove-project name="kernel/prebuilts/common-modules/virtual-device/mainline/arm64"/>
+  <remove-project name="kernel/prebuilts/common-modules/virtual-device/mainline/x86-64"/>
+
+</manifest>

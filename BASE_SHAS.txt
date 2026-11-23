@@ -1,13 +1,13 @@
 bootable/recovery b3c3a20cc99605ee0258e6322cdd47d5d85d17ef https://github.com/DerpFest-AOSP/android_bootable_recovery
 build/soong b6f67b1d5e7e92cae102d6327c22a6f0d35d30fe https://github.com/DerpFest-AOSP/android_build_soong
-device/mediatek/sepolicy_vndr fb53a1828c331688deb6efc63efaca3ed894beae https://github.com/bishalregmi105B/android_device_mediatek_sepolicy_vndr
+device/mediatek/sepolicy_vndr 76a520d5de8763f6391ca79e27c88121927420fe https://github.com/bishalregmi105B/android_device_mediatek_sepolicy_vndr
 external/wpa_supplicant_8 1063d796b547c4cd2c23c21da72ed988ac70a84a https://github.com/DerpFest-AOSP/android_external_wpa_supplicant_8
 frameworks/base 9da54e95e7ce8796a8d00df3ff1e009483c0042a https://codeberg.org/DerpFest-AOSP/android_frameworks_base
 frameworks/native fd5c4e012010cb4cc67af12243c61f17e7eac85b https://github.com/DerpFest-AOSP/android_frameworks_native
 frameworks/opt/net/ims 314c843f3627f936c46c9e6d61cb30017bd71fd3 https://android.googlesource.com/platform/frameworks/opt/net/ims
 frameworks/opt/telephony 8a538a7e6a4459a691d0f23927ec72279d2ce9f2 https://github.com/DerpFest-AOSP/android_frameworks_opt_telephony
 hardware/interfaces 928106fbfab17fbbcca4ae5b33ad726c230b32ae https://github.com/DerpFest-AOSP/android_hardware_interfaces
-packages/apps/Aperture b37cc3dd8afb143804d81b5696247851228b4e14 https://github.com/LineageOS/android_packages_apps_Aperture
+packages/apps/Aperture 0a140ed30b5c9f46b055c76f3fec03f1026cff25 https://github.com/LineageOS/android_packages_apps_Aperture
 packages/apps/CarrierConfig c9f82c3de8293731d4230758dc258916c12335a6 https://android.googlesource.com/platform/packages/apps/CarrierConfig
 packages/apps/Settings dc8901ff204066e8905315e1648c130ef5e6b449 https://github.com/DerpFest-AOSP/android_packages_apps_Settings
 packages/apps/Settings/DerpFestCustomizations 0b383d004dcf40fed14d36c608c2e1ad5a9b0a40 https://github.com/DerpFest-AOSP/android_packages_apps_DerpFestCustomizations
